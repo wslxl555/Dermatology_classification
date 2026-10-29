@@ -67,8 +67,6 @@ class Trainer:
             loss_disease_weight=self.config.get("loss_disease_weight", 1.0),
             loss_global_weight=self.config.get("loss_global_weight", 0.3),
             loss_detection_weight=self.config.get("loss_detection_weight", 1.0),
-            num_position_classes=self.config.get("num_position_classes", 4),
-            loss_position_weight=self.config.get("loss_position_weight", 0.3),
         )
 
         # 按皮损类别频率自动计算检测分支的 Focal alpha / CE 权重(长尾缓解)
@@ -183,14 +181,11 @@ class Trainer:
         self.model.train()
         self.train_metrics.reset()
         epoch_losses = defaultdict(float)
-        self._train_pos_correct = 0
-        self._train_pos_total = 0
 
         start_time = time.time()
         for step, batch in enumerate(self.train_loader):
             images = batch["image"].to(self.device)
             disease_labels = batch["disease_label"].to(self.device)
-            position_labels = batch["position_label"].to(self.device)
 
             # 如启用检测,则准备检测目标
             targets = None
@@ -211,8 +206,6 @@ class Trainer:
                     global_logits=output["global_logits"],
                     disease_targets=disease_labels,
                     detection_losses=det_losses,
-                    position_logits=output.get("position_logits"),
-                    position_targets=position_labels,
                 )
 
             # 反向传播
@@ -240,16 +233,6 @@ class Trainer:
                     output["disease_logits"].detach().cpu().numpy(),
                     disease_labels.cpu().numpy(),
                 )
-                # 跟踪位置准确率
-                if "position_logits" in output:
-                    pos_logits = output["position_logits"].detach().cpu()
-                    pos_targets = position_labels.cpu()
-                    valid_mask = pos_targets >= 0
-                    if valid_mask.sum() > 0:
-                        pos_pred = pos_logits[valid_mask].argmax(dim=-1)
-                        pos_correct = (pos_pred == pos_targets[valid_mask]).sum().item()
-                        self._train_pos_correct += pos_correct
-                        self._train_pos_total += valid_mask.sum().item()
 
             if step % self.config["log_interval"] == 0 and self.writer:
                 global_step = self.current_epoch * len(self.train_loader) + step
@@ -262,14 +245,11 @@ class Trainer:
         avg_losses = {k: v / len(self.train_loader) for k, v in epoch_losses.items()}
 
         elapsed = time.time() - start_time
-        pos_acc = (self._train_pos_correct / self._train_pos_total * 100
-                   if self._train_pos_total > 0 else 0.0)
         return {
             "epoch": self.current_epoch,
             "losses": avg_losses,
             "metrics": train_metrics,
             "time": elapsed,
-            "position_acc": pos_acc,
         }
 
     @torch.no_grad()
@@ -278,13 +258,10 @@ class Trainer:
         self.model.eval()
         self.val_metrics.reset()
         val_losses = defaultdict(float)
-        val_pos_correct = 0
-        val_pos_total = 0
 
         for batch in self.val_loader:
             images = batch["image"].to(self.device)
             disease_labels = batch["disease_label"].to(self.device)
-            position_labels = batch["position_label"].to(self.device)
 
             targets = None
             has_det_targets = False
@@ -303,8 +280,6 @@ class Trainer:
                 global_logits=output["global_logits"],
                 disease_targets=disease_labels,
                 detection_losses=det_losses,
-                position_logits=output.get("position_logits"),
-                position_targets=position_labels,
             )
 
             for k, v in loss_dict.items():
@@ -315,21 +290,8 @@ class Trainer:
                 disease_labels.cpu().numpy(),
             )
 
-            # 跟踪位置准确率
-            if "position_logits" in output:
-                pos_logits = output["position_logits"].cpu()
-                pos_targets = position_labels.cpu()
-                valid_mask = pos_targets >= 0
-                if valid_mask.sum() > 0:
-                    pos_pred = pos_logits[valid_mask].argmax(dim=-1)
-                    pos_correct = (pos_pred == pos_targets[valid_mask]).sum().item()
-                    val_pos_correct += pos_correct
-                    val_pos_total += valid_mask.sum().item()
-
         val_metrics = self.val_metrics.compute()
         avg_losses = {k: v / len(self.val_loader) for k, v in val_losses.items()}
-        pos_acc = (val_pos_correct / val_pos_total * 100
-                   if val_pos_total > 0 else 0.0)
 
         # TensorBoard 日志
         if self.writer:
@@ -343,7 +305,6 @@ class Trainer:
             "epoch": self.current_epoch,
             "losses": avg_losses,
             "metrics": val_metrics,
-            "position_acc": pos_acc,
         }
 
     @torch.no_grad()
@@ -432,15 +393,11 @@ class Trainer:
         auc_str = f"{val_auc:.4f}" if not math.isnan(val_auc) else "N/A"
         lines.append(f"  Train | Acc: {train_acc:.4f} | Macro F1: {train_f1:.4f}")
         lines.append(f"  Val   | Acc: {val_acc:.4f} | Macro F1: {val_f1:.4f} | AUC: {auc_str}")
-        # 位置准确率
-        train_pos = train_result.get("position_acc", 0)
-        val_pos = val_result.get("position_acc", 0)
-        lines.append(f"  Pos   | Train Acc: {train_pos:.1f}% | Val Acc: {val_pos:.1f}%")
         # 各损失分量(含检测损失,便于观察检测分支是否在学)
         train_losses = train_result.get("losses", {})
         val_losses = val_result.get("losses", {})
         loss_keys = [k for k in ("loss_disease", "loss_global", "loss_detection",
-                                 "loss_position", "loss_total") if k in train_losses]
+                                 "loss_total") if k in train_losses]
         if loss_keys:
             train_loss_str = "  ".join(
                 f"{k}={train_losses.get(k, 0):.4f}" for k in loss_keys)
@@ -644,7 +601,15 @@ class Trainer:
             return 0
 
         checkpoint = torch.load(path, map_location=self.device, weights_only=False)
-        self.model.load_state_dict(checkpoint["model_state_dict"])
+        # strict=False 以兼容旧 checkpoint：旧版包含已移除的 position_classifier
+        # 权重，加载时跳过这些多余键（仅恢复模型权重）。
+        missing, unexpected = self.model.load_state_dict(
+            checkpoint["model_state_dict"], strict=False,
+        )
+        if missing:
+            print(f"  [WARN] Missing keys (will use random init): {len(missing)} keys")
+        if unexpected:
+            print(f"  [WARN] Unexpected keys (ignored): {len(unexpected)} keys")
         # 旧版 checkpoint 可能包含优化器/调度器状态；新版为节省内存不保存，
         # 缺失时跳过（仅恢复模型权重，优化器从当前学习率重新开始）。
         if "optimizer_state_dict" in checkpoint:

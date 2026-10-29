@@ -14,7 +14,7 @@ import torch.nn.functional as F
 from models.backbone import build_backbone, backbone_supports_detection
 from models.classification_head import DiseaseClassifier
 from models.detection_head import build_detection_head
-from config import MODEL_CONFIG, NUM_DISEASE_CLASSES, NUM_LESION_CLASSES, NUM_POSITION_CLASSES
+from config import MODEL_CONFIG, NUM_DISEASE_CLASSES, NUM_LESION_CLASSES
 
 
 class MultiTaskEczemaModel(nn.Module):
@@ -34,7 +34,6 @@ class MultiTaskEczemaModel(nn.Module):
         num_lesion_classes: int = NUM_LESION_CLASSES,
         detection_enabled: bool = MODEL_CONFIG["detection_enabled"],
         offline: bool = False,
-        num_position_classes: int = NUM_POSITION_CLASSES,
         detection_head: str = MODEL_CONFIG["detection_head"],
     ):
         super().__init__()
@@ -92,12 +91,6 @@ class MultiTaskEczemaModel(nn.Module):
             num_classes=num_disease_classes,
         )
 
-        # 5) 拍摄位置分类头：从全局特征预测 L/S/J/B 位置
-        self.position_classifier = DiseaseClassifier(
-            in_features=self.global_feat_dim,
-            num_classes=num_position_classes,
-        )
-
     def forward(self, images: torch.Tensor, targets: list[dict] = None) -> dict:
         """
         前向传播。
@@ -150,13 +143,9 @@ class MultiTaskEczemaModel(nn.Module):
         disease_logits = self.disease_classifier(fused_features)
         global_logits = self.global_classifier(global_pooled)
 
-        # 拍摄位置分类（基于全局特征）
-        position_logits = self.position_classifier(global_pooled)
-
         result = {
             "disease_logits": disease_logits,
             "global_logits": global_logits,
-            "position_logits": position_logits,
             "detection": detection_output,
         }
 
@@ -190,16 +179,11 @@ class MultiTaskEczemaModel(nn.Module):
         disease_probs = F.softmax(output["disease_logits"], dim=-1)
         disease_pred = disease_probs.argmax(dim=-1)
 
-        position_probs = F.softmax(output["position_logits"], dim=-1)
-        position_pred = position_probs.argmax(dim=-1)
-
         detection = output.get("detection", {})
 
         return {
             "disease_probs": disease_probs,
             "disease_pred": disease_pred,
-            "position_probs": position_probs,
-            "position_pred": position_pred,
             "detection_boxes": detection.get("boxes", []),
             "detection_labels": detection.get("labels", []),
             "detection_scores": detection.get("scores", []),
