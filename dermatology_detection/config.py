@@ -185,7 +185,7 @@ TRAINING_CONFIG = {
 
     # 训练
     "max_epochs": 50,
-    "early_stopping_patience": 10,
+    "early_stopping_patience": 6,
     "gradient_clip_norm": 1.0,
 
     # 损失
