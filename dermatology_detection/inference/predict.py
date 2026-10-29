@@ -23,7 +23,7 @@ from data.transforms import get_val_transforms
 from models.multi_task_model import build_model
 from config import (
     CHECKPOINT_DIR, DISEASE_CLASSES, DISEASE_CLASSES_ZH,
-    LESION_CLASSES, POSITION_CLASSES,
+    LESION_CLASSES,
 )
 from data.label_mapping import LESION_CLASSES as LESION_CLASSES_FULL
 
@@ -99,10 +99,6 @@ def predict_image(
     return {
         "disease_probs": result["disease_probs"].cpu().numpy()[0],
         "disease_pred": result["disease_pred"].cpu().item(),
-        "position_probs": result.get("position_probs", torch.zeros(4)).cpu().numpy()[0]
-                         if result.get("position_probs") is not None else None,
-        "position_pred": result.get("position_pred", torch.tensor(-1)).cpu().item()
-                         if result.get("position_pred") is not None else -1,
         "detection_boxes": det_boxes_scaled,
         "detection_labels": result["detection_labels"],
         "detection_scores": result["detection_scores"],
@@ -126,17 +122,6 @@ def print_results(result: dict, score_thresh: float = 0.3):
         bar = "█" * int(probs[i] * 40)
         marker = " ←" if i == pred else ""
         print(f"  {cls_name:25s} ({zh}): {probs[i]:.4f} {bar}{marker}")
-
-    # 位置预测
-    pos_probs = result.get("position_probs")
-    pos_pred = result.get("position_pred", -1)
-    if pos_probs is not None and pos_pred >= 0:
-        print(f"\nPredicted position: {POSITION_CLASSES[pos_pred]}")
-        print(f"Position probabilities:")
-        for i, pos_name in enumerate(POSITION_CLASSES):
-            bar = "█" * int(pos_probs[i] * 40)
-            marker = " ←" if i == pos_pred else ""
-            print(f"  {pos_name}: {pos_probs[i]:.4f} {bar}{marker}")
 
     # 检测结果
     boxes = result.get("detection_boxes", [])
@@ -172,7 +157,7 @@ def print_results(result: dict, score_thresh: float = 0.3):
 
 def visualize_prediction(image_path: str, result: dict, score_thresh: float = 0.3,
                          save_path: str = None):
-    """用边界框可视化预测结果,标注皮损空间位置(L/S/J/B)。
+    """用边界框可视化预测结果。
 
     参数:
         image_path: 原始图像路径
@@ -233,22 +218,13 @@ def visualize_prediction(image_path: str, result: dict, score_thresh: float = 0.
                 bbox=dict(boxstyle="round,pad=0.15", facecolor=color[:3], alpha=0.8),
             )
 
-    # ---- 标题：疾病 + 空间位置预测 ----
+    # ---- 标题：疾病预测 ----
     probs = result["disease_probs"]
     pred = result["disease_pred"]
     pred_en = DISEASE_CLASSES[pred]
     pred_zh = DISEASE_CLASSES_ZH.get(pred_en, "")
 
-    pos_pred = result.get("position_pred", -1)
-    pos_probs = result.get("position_probs")
-    if pos_probs is not None and pos_pred >= 0:
-        pos_name = POSITION_CLASSES[pos_pred]
-        pos_conf = pos_probs[pos_pred]
-        title = (f"Disease: {pred_en} ({pred_zh})  |  "
-                 f"Position: {pos_name} (conf: {pos_conf:.2%})  |  "
-                 f"Overall: {probs[pred]:.2%}")
-    else:
-        title = f"Prediction: {pred_en} ({pred_zh})  confidence: {probs[pred]:.2%}"
+    title = f"Prediction: {pred_en} ({pred_zh})  confidence: {probs[pred]:.2%}"
 
     ax.set_title(title, fontsize=14, fontweight="bold")
     ax.axis("off")
@@ -283,7 +259,7 @@ def main():
         detection_enabled=config.get("detection_enabled", False),
         detection_head=config.get("detection_head", "fcos"),
     )
-    # 使用 strict=False 以兼容新旧 checkpoint（如 position_classifier 权重不存在时跳过）
+    # 使用 strict=False 以兼容新旧 checkpoint（旧版含已移除的 position_classifier 权重，加载时跳过）
     missing, unexpected = model.load_state_dict(
         checkpoint["model_state_dict"], strict=False,
     )

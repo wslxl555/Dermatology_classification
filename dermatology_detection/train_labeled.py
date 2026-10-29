@@ -72,8 +72,6 @@ LABELED_TRAIN_CONFIG = {
     # 损失
     "loss_disease_weight": 1.0,
     "loss_detection_weight": 1.0,
-    "loss_position_weight": 0.0,  # labeled 数据无位置信息
-    "num_position_classes": 4,
     "focal_gamma": 2.0,
     "label_smoothing": 0.1,
 
@@ -178,7 +176,6 @@ def _collate_fn(batch: list[dict]) -> dict:
     """针对变长 bbox 的自定义 collate 函数。"""
     images = torch.stack([item["image"] for item in batch])
     disease_labels = torch.tensor([item["disease_label"] for item in batch])
-    position_labels = torch.tensor([item["position_label"] for item in batch])
     lesion_multi_hot = torch.stack([item["lesion_multi_hot"] for item in batch])
     bboxes = [item["bboxes"] for item in batch]
     lesion_labels = [item["lesion_labels"] for item in batch]
@@ -187,7 +184,6 @@ def _collate_fn(batch: list[dict]) -> dict:
     return {
         "image": images,
         "disease_label": disease_labels,
-        "position_label": position_labels,
         "lesion_multi_hot": lesion_multi_hot,
         "bboxes": bboxes,
         "lesion_labels": lesion_labels,

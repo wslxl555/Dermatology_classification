@@ -85,7 +85,7 @@ class MultiTaskLoss(nn.Module):
     """
     多任务学习的组合损失:
       L_total = λ_disease * L_disease + λ_global * L_global
-              + λ_detection * L_detection + λ_position * L_position
+              + λ_detection * L_detection
     """
 
     def __init__(
@@ -97,8 +97,6 @@ class MultiTaskLoss(nn.Module):
         loss_disease_weight: float = 1.0,
         loss_global_weight: float = 0.3,
         loss_detection_weight: float = 0.5,
-        num_position_classes: int = 4,
-        loss_position_weight: float = 0.3,
     ):
         super().__init__()
 
@@ -114,17 +112,10 @@ class MultiTaskLoss(nn.Module):
             reduction="mean",
             label_smoothing=label_smoothing,
         )
-        self.position_loss = FocalLoss(
-            alpha=None,
-            gamma=focal_gamma,
-            reduction="mean",
-            label_smoothing=0.0,  # 位置分类不做 label smoothing
-        )
 
         self.loss_disease_weight = loss_disease_weight
         self.loss_global_weight = loss_global_weight
         self.loss_detection_weight = loss_detection_weight
-        self.loss_position_weight = loss_position_weight
 
     def forward(
         self,
@@ -132,8 +123,6 @@ class MultiTaskLoss(nn.Module):
         global_logits: torch.Tensor,
         disease_targets: torch.Tensor,
         detection_losses: dict = None,
-        position_logits: torch.Tensor = None,
-        position_targets: torch.Tensor = None,
     ) -> tuple[torch.Tensor, dict]:
         """
         计算多任务总损失。
@@ -143,8 +132,6 @@ class MultiTaskLoss(nn.Module):
             global_logits: [B, num_disease] 仅全局分支的分类 logits。
             disease_targets: [B] 疾病类别索引。
             detection_losses: 来自 RPN/RoI 头的检测损失字典。
-            position_logits: [B, num_position] 位置分类 logits。
-            position_targets: [B] 位置类别索引 (-1 = ignore)。
 
         返回:
             total_loss: 标量张量。
@@ -167,20 +154,6 @@ class MultiTaskLoss(nn.Module):
             loss_detection = sum(v for v in detection_losses.values())
             total_loss = total_loss + self.loss_detection_weight * loss_detection
             loss_dict["loss_detection"] = loss_detection.item()
-
-        # 位置分类损失
-        if position_logits is not None and position_targets is not None:
-            # 过滤掉 unknown 位置 (label=-1) 的样本
-            valid_mask = position_targets >= 0
-            if valid_mask.sum() > 0:
-                loss_position = self.position_loss(
-                    position_logits[valid_mask],
-                    position_targets[valid_mask],
-                )
-                total_loss = total_loss + self.loss_position_weight * loss_position
-                loss_dict["loss_position"] = loss_position.item()
-            else:
-                loss_dict["loss_position"] = 0.0
 
         loss_dict["loss_total"] = total_loss.item()
 

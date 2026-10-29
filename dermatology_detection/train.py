@@ -24,7 +24,6 @@ from torch.utils.data import DataLoader, WeightedRandomSampler
 from config import (
     FULL_CONFIG, TINY_CONFIG, MEDIUM_CPU_CONFIG,
     DATA_ROOT, OUTPUT_DIR, CHECKPOINT_DIR,
-    NUM_POSITION_CLASSES,
 )
 from data.prepare_data import scan_dataset, create_splits
 from data.dataset import EczemaDataset
@@ -249,7 +248,6 @@ def main():
     print(f"  Augmentation:  {config['augmentation']}")
     print(f"  Detection:     {config.get('detection_enabled', False)}")
     print(f"  Data tier:     {config.get('data_tier', '入选')}")
-    print(f"  Position head: True (4 classes: L/S/J/B)")
     print(f"  Train samples: {len(train_samples)}")
     print(f"  Val samples:   {len(val_samples)}")
     print(f"{'='*60}\n")
@@ -275,7 +273,6 @@ def _collate_fn(batch: list[dict]) -> dict:
     """针对变长 bbox 的自定义 collate 函数。"""
     images = torch.stack([item["image"] for item in batch])
     disease_labels = torch.tensor([item["disease_label"] for item in batch])
-    position_labels = torch.tensor([item["position_label"] for item in batch])
     lesion_multi_hot = torch.stack([item["lesion_multi_hot"] for item in batch])
     bboxes = [item["bboxes"] for item in batch]
     lesion_labels = [item["lesion_labels"] for item in batch]
@@ -284,7 +281,6 @@ def _collate_fn(batch: list[dict]) -> dict:
     return {
         "image": images,
         "disease_label": disease_labels,
-        "position_label": position_labels,
         "lesion_multi_hot": lesion_multi_hot,
         "bboxes": bboxes,
         "lesion_labels": lesion_labels,

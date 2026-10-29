@@ -13,7 +13,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from config import DATA_ROOT, POSITION_CLASSES
+from config import DATA_ROOT
 from data.label_mapping import (
     LESION_CLASSES,
     LESION_CLASS_TO_IDX,
@@ -83,9 +83,6 @@ class EczemaDataset(Dataset):
             "bullous_pemphigoid": 1,
             "urticaria": 2,
         }
-
-        # 位置标签映射 (4 类):L/S/J/B → 0/1/2/3
-        self.position_to_idx = {pos: i for i, pos in enumerate(POSITION_CLASSES)}
 
     def __len__(self) -> int:
         """返回数据集的样本数量。"""
@@ -181,10 +178,6 @@ class EczemaDataset(Dataset):
         disease = sample.get("disease", "eczema")
         disease_label = self.disease_to_idx.get(disease, 0)
 
-        # 位置标签:从子目录名称提取的 L/S/J/B 拍摄位置
-        position = sample.get("position", "unknown")
-        position_label = self.position_to_idx.get(position, -1)  # unknown → -1 (ignore)
-
         # lesion_multi_hot 用于描述“这张图里出现了哪些皮损类型”,
         # 其本质是多标签分类目标,适合同时存在多种病灶表现的场景。
         lesion_multi_hot = label_to_multi_hot(raw_labels)
@@ -253,7 +246,6 @@ class EczemaDataset(Dataset):
         return {
             "image": image,                          # [C, H, W] 已归一化
             "disease_label": disease_label,           # int 0-2
-            "position_label": position_label,         # int 0-3 (-1 = unknown/ignore)
             "lesion_multi_hot": torch.tensor(lesion_multi_hot, dtype=torch.float32),
             "bboxes": bboxes_tensor,                  # [N, 4]
             "lesion_labels": lesion_labels_tensor,    # [N]
