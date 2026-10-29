@@ -1,0 +1,45 @@
+# === Python ===
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# === Editors / OS ===
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# === Model checkpoints & weights (large binaries) ===
+*.pth
+*.pt
+*.ckpt
+*.onnx
+*.h5
+*.weights
+*.safetensors
+*.bin
+checkpoints/
+outputs/
+
+# === Archives & backups ===
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.gz
+migration_*/
+
+# === Datasets (keep local, not in Git) ===
+labeled/
+unlabeled/
+
+# === Old / backup project copies ===
+pre_dermatology_classifier/
+pre_dermatology_detection/
+
+# === Logs ===
+*.log
