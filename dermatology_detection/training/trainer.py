@@ -15,7 +15,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.amp import GradScaler, autocast
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts, LinearLR, SequentialLR
+from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 
 from training.losses import MultiTaskLoss, compute_class_weights
 from training.metrics import MetricsTracker
@@ -79,16 +79,15 @@ class Trainer:
             weight_decay=self.config["weight_decay"],
         )
 
-        # 学习率调度:warmup + cosine
+        # 学习率调度:warmup + 单调余弦下降
         warmup = LinearLR(
             self.optimizer,
             start_factor=1e-3,
             total_iters=self.config["warmup_epochs"] * len(train_loader),
         )
-        cosine = CosineAnnealingWarmRestarts(
+        cosine = CosineAnnealingLR(
             self.optimizer,
-            T_0=self.config["max_epochs"] * len(train_loader) // 2,
-            T_mult=1,
+            T_max=(self.config["max_epochs"] - self.config["warmup_epochs"]) * len(train_loader),
             eta_min=self.config["min_lr"],
         )
         self.scheduler = SequentialLR(
