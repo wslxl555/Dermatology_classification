@@ -119,9 +119,13 @@ def compute_map(
     predictions: list[dict],
     ground_truths: list[dict],
     num_classes: int,
-    iou_thresholds: tuple[float, ...] = (0.5, 0.75),
+    iou_thresholds: tuple[float, ...] = (0.5, 0.3, 0.25),
 ) -> dict[str, float]:
-    """在多个 IoU 阈值下计算 mAP，返回 mAP@0.5 / mAP@0.75 / mAP@[.5,.75]。"""
+    """在多个 IoU 阈值下计算 mAP。
+
+    默认 (0.5, 0.3, 0.25)：0.5 为通用标准，0.3/0.25 面向小病灶——
+    病灶在 512 下中位约 20px，IoU 对小框的位置偏移异常敏感。
+    """
     per_thresh = {}
     for t in iou_thresholds:
         per_thresh[t] = compute_map_per_class(
@@ -134,5 +138,114 @@ def compute_map(
         for k, v in per_thresh[t].items():
             if k != "mAP":
                 out[f"{k}@{t}"] = v
-    out["mAP@[.5,.75]"] = float(np.mean([out[f"mAP@{t}"] for t in iou_thresholds]))
+    # 多阈值均值（键名随阈值动态生成）
+    thresh_str = ",".join(f"{t:g}" for t in iou_thresholds)
+    out[f"mAP@[{thresh_str}]"] = float(
+        np.mean([out[f"mAP@{t}"] for t in iou_thresholds]))
+    return out
+
+
+def compute_center_hit_map_per_class(
+    predictions: list[dict],
+    ground_truths: list[dict],
+    num_classes: int,
+    size_ratio: float = 2.0,
+) -> dict[str, float]:
+    """在"中心命中 + 尺寸约束"下计算每类 AP 与 mAP。
+
+    匹配规则（对小病灶比 IoU 更宽松）：
+      - 预测框中心点落在 GT 框内；
+      - 预测框面积在 [GT/k, GT*k] 之间（k=size_ratio），防止巨框/过小框蒙混；
+      - 类别一致。
+    其余与 compute_map_per_class 一致（每类 PR → AP → 平均）。
+    """
+    gt_per_class = [[] for _ in range(num_classes)]
+    for g in ground_truths:
+        boxes = np.asarray(g["boxes"], dtype=np.float32)
+        labels = np.asarray(g["labels"], dtype=np.int64)
+        for c in range(num_classes):
+            sel = boxes[labels == c] if len(boxes) > 0 else np.zeros((0, 4), np.float32)
+            gt_per_class[c].append(sel)
+
+    pred_per_class = [[] for _ in range(num_classes)]
+    for img_idx, p in enumerate(predictions):
+        boxes = np.asarray(p["boxes"], dtype=np.float32)
+        scores = np.asarray(p["scores"], dtype=np.float32)
+        labels = np.asarray(p["labels"], dtype=np.int64)
+        if len(boxes) == 0:
+            continue
+        for c in range(num_classes):
+            m = labels == c
+            for i in np.where(m)[0]:
+                pred_per_class[c].append((img_idx, scores[i], boxes[i]))
+
+    aps = {}
+    for c in range(num_classes):
+        preds = sorted(pred_per_class[c], key=lambda x: -x[1])
+        gt_matched = [np.zeros(len(gt), dtype=bool) for gt in gt_per_class[c]]
+        n_gt = sum(len(g) for g in gt_per_class[c])
+
+        tp = np.zeros(len(preds), dtype=np.float32)
+        fp = np.zeros(len(preds), dtype=np.float32)
+        for j, (img_idx, _score, box) in enumerate(preds):
+            gt_boxes = gt_per_class[c][img_idx]
+            if len(gt_boxes) == 0:
+                fp[j] = 1.0
+                continue
+
+            cx = (box[0] + box[2]) / 2.0
+            cy = (box[1] + box[3]) / 2.0
+            pred_area = (box[2] - box[0]) * (box[3] - box[1])
+
+            # 在"中心命中 + 尺寸约束"的候选里选 IoU 最大者（处理重叠 GT）
+            best = -1
+            best_iou = -1.0
+            for gi, gb in enumerate(gt_boxes):
+                if gt_matched[img_idx][gi]:
+                    continue
+                if not (gb[0] <= cx <= gb[2] and gb[1] <= cy <= gb[3]):
+                    continue
+                gt_area = (gb[2] - gb[0]) * (gb[3] - gb[1])
+                if pred_area <= 0 or gt_area <= 0:
+                    continue
+                ratio = pred_area / gt_area
+                if ratio > size_ratio or ratio < 1.0 / size_ratio:
+                    continue
+                iou = box_iou_np(box[None, :], gb[None, :])[0][0]
+                if iou > best_iou:
+                    best_iou = iou
+                    best = gi
+
+            if best >= 0:
+                tp[j] = 1.0
+                gt_matched[img_idx][best] = True
+            else:
+                fp[j] = 1.0
+
+        tp_cum = np.cumsum(tp)
+        fp_cum = np.cumsum(fp)
+        recalls = tp_cum / n_gt if n_gt > 0 else np.zeros_like(tp_cum)
+        precisions = tp_cum / np.maximum(tp_cum + fp_cum, 1e-6)
+        aps[f"AP_cls{c}"] = compute_ap(precisions, recalls)
+
+    aps["mAP"] = float(np.mean([v for k, v in aps.items() if k.startswith("AP_")]))
+    return aps
+
+
+def compute_center_hit_map(
+    predictions: list[dict],
+    ground_truths: list[dict],
+    num_classes: int,
+    size_ratio: float = 2.0,
+) -> dict[str, float]:
+    """计算"中心命中"mAP，作为 IoU mAP 的宽松补充指标。
+
+    返回键名带 center_hit 前缀：center_hit_mAP / center_hit_AP_cls0 / ...
+    """
+    per_class = compute_center_hit_map_per_class(
+        predictions, ground_truths, num_classes, size_ratio)
+    out = {"center_hit_mAP": per_class["mAP"]}
+    for k, v in per_class.items():
+        if k != "mAP":
+            out[f"center_hit_{k}"] = v
     return out
