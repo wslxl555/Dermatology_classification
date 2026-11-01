@@ -2,7 +2,7 @@
 在 labeled 验证集上评估检测分支的 box mAP。
 
 从 checkpoint 恢复 backbone + detection_head，在 val 划分上运行推理，
-用 GT bbox 计算 COCO 风格 mAP@0.5 / mAP@0.75 / mAP@[.5,.75]。
+用 GT bbox 计算多阈值 mAP（0.5 / 0.3 / 0.25）与中心命中 mAP。
 
 用法:
     python evaluate_detection.py --checkpoint best.pth
@@ -31,7 +31,7 @@ from data.dataset import EczemaDataset, _resolve_path
 from data.label_mapping import parse_label, LESION_CLASS_TO_IDX
 from data.transforms import get_val_transforms
 from models.multi_task_model import build_model
-from training.det_metrics import compute_map
+from training.det_metrics import compute_map, compute_center_hit_map
 from utils.labelme_parser import parse_labelme
 from utils.voc_parser import parse_voc_xml
 
@@ -265,16 +265,19 @@ def main():
                     "boxes": gt_b.numpy(), "labels": gt_l.numpy(),
                 })
 
-    # 计算 mAP
+    # 计算 mAP（多阈值 + 中心命中补充指标）
     results = compute_map(predictions, ground_truths, NUM_LESION_CLASSES,
-                          iou_thresholds=(0.5, 0.75))
+                          iou_thresholds=(0.5, 0.3, 0.25))
+    results.update(compute_center_hit_map(predictions, ground_truths,
+                                          NUM_LESION_CLASSES))
 
     print("\n" + "=" * 60)
     print("DETECTION mAP ON LABELED VAL SPLIT")
     print("=" * 60)
-    print(f"  mAP@0.5:       {results['mAP@0.5']:.4f}")
-    print(f"  mAP@0.75:      {results['mAP@0.75']:.4f}")
-    print(f"  mAP@[.5,.75]:  {results['mAP@[.5,.75]']:.4f}")
+    print(f"  mAP@0.5:        {results['mAP@0.5']:.4f}")
+    print(f"  mAP@0.3:        {results['mAP@0.3']:.4f}")
+    print(f"  mAP@0.25:       {results['mAP@0.25']:.4f}")
+    print(f"  center-hit mAP: {results['center_hit_mAP']:.4f}  (中心命中 + 尺寸≤2×)")
     print("\nPer-class AP@0.5:")
     for c, name in enumerate(LESION_CLASSES):
         print(f"  {name:18s}: {results.get(f'AP_cls{c}@0.5', 0.0):.4f}")
