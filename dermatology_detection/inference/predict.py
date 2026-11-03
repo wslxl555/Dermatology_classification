@@ -35,7 +35,7 @@ def parse_args():
                         help="Path to input image")
     parser.add_argument("--checkpoint", type=str, required=True,
                         help="Checkpoint filename in outputs/checkpoints/")
-    parser.add_argument("--image_size", type=int, default=512)
+    parser.add_argument("--image_size", type=int, default=1024)
     parser.add_argument("--visualize", action="store_true",
                         help="Show visualization (requires display)")
     parser.add_argument("--save", type=str, default=None,
@@ -49,7 +49,7 @@ def parse_args():
 def predict_image(
     image_path: str,
     model: torch.nn.Module,
-    image_size: tuple[int, int] = (512, 512),
+    image_size: tuple[int, int] = (1024, 1024),
     device: str = "cuda",
 ) -> dict:
     """在单张图像上执行推理。

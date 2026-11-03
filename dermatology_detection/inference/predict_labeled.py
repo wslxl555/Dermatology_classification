@@ -78,7 +78,7 @@ class LesionPredictor:
         checkpoint_path: str = None,
         backbone: str = "convnext_tiny",
         detection_enabled: bool = True,
-        image_size: tuple = (512, 512),
+        image_size: tuple = (1024, 1024),
         conf_threshold: float = 0.5,
         device: str = None,
     ):
@@ -426,7 +426,7 @@ def main():
                         choices=["convnext_tiny", "convnext_small", "resnet50", "swin_t"])
     parser.add_argument("--no_detection", action="store_true",
                         help="Disable lesion detection (classification only)")
-    parser.add_argument("--image_size", type=int, default=512,
+    parser.add_argument("--image_size", type=int, default=1024,
                         help="Input image size")
     parser.add_argument("--conf_threshold", type=float, default=0.5,
                         help="Detection confidence threshold")

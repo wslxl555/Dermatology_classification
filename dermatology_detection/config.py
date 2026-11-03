@@ -155,7 +155,7 @@ TRAINING_CONFIG = {
     "device": "cuda",  # cuda, cpu
 
     # 数据
-    "image_size": (512, 512),  # H x W(高 x 宽)
+    "image_size": (1024, 1024),  # H x W(高 x 宽)
     "batch_size": 8,
     "num_workers": 4,
 

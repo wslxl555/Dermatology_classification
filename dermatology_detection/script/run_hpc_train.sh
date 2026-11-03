@@ -60,9 +60,9 @@
 #CONDA_ENV=dermatology_classifier                                 # conda 环境名
 BACKBONE=convnext_tiny
 DETECTION_HEAD=fcos                                      # fcos / faster_rcnn / cascade_rcnn / yolov8 / rtdetr
-IMAGE_SIZE=512
+IMAGE_SIZE=1024
 EPOCHS=50
-BATCH_SIZE=8
+BATCH_SIZE=2
 
 set -e  # 任一步出错立即终止，便于尽早暴露问题
 

@@ -49,10 +49,10 @@ def parse_args():
     parser.add_argument("--tile", action="store_true",
                         help="滑窗切块推理:在原生分辨率上滑窗预测并拼接,"
                              "用于评估以 --augmentation tile 训练的模型")
-    parser.add_argument("--tile_size", type=int, default=512,
-                        help="滑窗块大小(默认 512,需与训练 image_size 一致)")
-    parser.add_argument("--tile_stride", type=int, default=256,
-                        help="滑窗步长(默认 256,与 tile_size 重叠一半)")
+    parser.add_argument("--tile_size", type=int, default=1024,
+                        help="滑窗块大小(默认 1024,需与训练 image_size 一致)")
+    parser.add_argument("--tile_stride", type=int, default=512,
+                        help="滑窗步长(默认 512,与 tile_size 重叠一半)")
     parser.add_argument("--device", type=str, default=None)
     return parser.parse_args()
 

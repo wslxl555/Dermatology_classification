@@ -6,7 +6,6 @@
 
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
-import cv2
 
 
 def get_train_transforms(image_size: tuple[int, int] = (512, 512),
@@ -27,7 +26,7 @@ def get_train_transforms(image_size: tuple[int, int] = (512, 512),
         # 在 stride4 上只有 ~3 个正样本格点而无法学定位。
         # 注意:只做不改变尺度的几何变换(翻转/90° 旋转),不做 Affine 缩放。
         return A.Compose([
-            A.RandomCrop(h, w, p=1.0),
+            A.RandomCrop(h, w, p=1.0, pad_if_needed=True),
 
             # 颜色 / 亮度(安全,不改变尺度)
             A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1, hue=0.05, p=0.5),
@@ -125,7 +124,7 @@ def get_val_transforms(image_size: tuple[int, int] = (512, 512),
     h, w = image_size
     if level == "tile":
         return A.Compose([
-            A.CenterCrop(h, w, p=1.0),
+            A.CenterCrop(h, w, p=1.0, pad_if_needed=True),
             A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             ToTensorV2(),
         ], bbox_params=A.BboxParams(format="pascal_voc",

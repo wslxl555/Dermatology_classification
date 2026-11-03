@@ -7,8 +7,8 @@
 设计：
   1. FPN 用于多尺度特征融合（torchvision.ops.FeaturePyramidNetwork）
   2. 每个 FPN 层级共享卷积头 → 类别 logits + 框回归 + centerness
-  3. 训练：落在 GT 框内部的位置为正样本；根据框面积分配到 FPN 层级
-     （小框 → 高分辨率层级，大框 → 低分辨率层级）。
+  3. 训练：中心落在 GT 框内的位置全部为正样本（稠密分类）；每个框
+     仅由预测框 IoU 最大的位置监督回归 + centerness。
   4. 推理：score = sqrt(cls_prob × centerness)，阈值过滤 + 批量 NMS。
 
 参考文献：
@@ -390,11 +390,12 @@ class LesionDetectionHead(nn.Module):
         """
         计算分类 + 回归 + centerness 损失。
 
-        对每个 GT 框：
+        分配方案（稠密分类 + 最大 IoU 回归）：
           1. 根据框面积分配到最佳的 FPN 层级。
-          2. 中心落在框内的位置为正样本。
-          3. 以 3:1 的比例采样负样本（不在任何框内的位置），
-             使模型学会抑制误检。
+          2. 中心落在框内的位置全部为正样本，学习分类标签（稠密）。
+          3. 对每个 GT 框，在这些正样本里用当前预测框与 GT 的 IoU
+             选出交并比最大的那一个，仅由它监督回归 + centerness。
+          4. 以 3:1 的比例采样负样本（不在任何框内的位置）。
         """
         B = images.shape[0]
         device = images.device
@@ -416,20 +417,9 @@ class LesionDetectionHead(nn.Module):
             if gt_boxes is None or len(gt_boxes) == 0:
                 continue
 
-            # 为该图像构建各层级的正样本掩码
-            level_pos_masks: list[torch.Tensor] = []
-            level_pos_ys: list[torch.Tensor] = []
-            level_pos_xs: list[torch.Tensor] = []
-            level_targets: list[dict] = []
-
-            for li in range(num_levels):
-                H, W = fpn_feats[li].shape[-2:]
-                pos_mask = torch.zeros(H, W, dtype=torch.bool, device=device)
-                pos_data: dict[int, dict] = {}  # (y,x) → 目标数据
-                level_pos_masks.append(pos_mask)
-                level_pos_ys.append([])
-                level_pos_xs.append([])
-                level_targets.append(pos_data)
+            # 分类目标（稠密）与回归目标（稀疏）分开维护
+            level_cls: list[dict] = [{} for _ in range(num_levels)]
+            level_reg: list[dict] = [{} for _ in range(num_levels)]
 
             # 收集正样本
             for gi, (box, label) in enumerate(zip(gt_boxes, gt_labels)):
@@ -462,9 +452,6 @@ class LesionDetectionHead(nn.Module):
                     cy = gy[py]
 
                     # 回归目标按 stride 归一化(格子单位):像素距离 / stride。
-                    # 这样目标量级 O(1)、与输入分辨率无关,避免像素单位下
-                    # 回归损失随分辨率暴涨、淹没分类/centerness 头。
-                    # centerness 是 min/max 比值,不受除以 stride 影响。
                     l_tgt = ((cx - x1) / stride).clamp(min=0)
                     t_tgt = ((cy - y1) / stride).clamp(min=0)
                     r_tgt = ((x2 - cx) / stride).clamp(min=0)
@@ -478,45 +465,51 @@ class LesionDetectionHead(nn.Module):
                     cls_tgt = torch.zeros(self.num_classes, device=device)
                     cls_tgt[label_idx] = 1.0
 
-                    # 保存正样本数据并更新掩码
-                    bbox_tgt = torch.stack([l_tgt, t_tgt, r_tgt, b_tgt], dim=1)
+                    # 1) 稠密分类：所有中心落在框内的位置都学习分类标签
                     for j in range(len(py)):
                         key = (py[j].item(), px[j].item())
-                        # 若已被另一个框标记为正样本，保留第一次分配
-                        if key not in level_targets[li]:
-                            level_targets[li][key] = {
-                                "cls": cls_tgt,
-                                "bbox": bbox_tgt[j],
-                                "ctr": ctr_tgt[j],
-                            }
+                        if key not in level_cls[li]:
+                            level_cls[li][key] = cls_tgt
 
-                    # 更新各层级的正样本掩码（所有框的并集）
-                    # 需要用唯一索引重建掩码
-                    # 处理完所有框后再收集唯一位置
+                    # 2) 稀疏回归：在这些位置里选预测框 IoU 最大的那一个
+                    best = _select_max_iou(
+                        bbox_preds_list[li][b].detach(),
+                        py, px, cx, cy, stride, box,
+                    )
+                    key = (py[best].item(), px[best].item())
+                    if key not in level_reg[li]:
+                        level_reg[li][key] = (
+                            torch.stack([l_tgt, t_tgt, r_tgt, b_tgt], dim=1)[best],
+                            ctr_tgt[best],
+                        )
 
-            # --- 处理完该图像的所有框后，收集正样本 ---
+            # --- 处理完该图像的所有框后，收集正负样本 ---
             for li in range(num_levels):
-                pos_data = level_targets[li]
-                if not pos_data:
+                cls_pos = level_cls[li]
+                reg_pos = level_reg[li]
+                if not cls_pos:
                     continue
 
                 H, W = fpn_feats[li].shape[-2:]
-                # 构建所有正样本位置的掩码，用于负样本采样
+                # 构建所有分类正样本位置的掩码，用于负样本采样
                 pos_mask = torch.zeros(H, W, dtype=torch.bool, device=device)
-                for (py, px) in pos_data:
+                for (py, px) in cls_pos:
                     pos_mask[py, px] = True
 
-                # 将正样本加入扁平列表
-                for (py, px), data in pos_data.items():
-                    flat_cls_targets.append(data["cls"])
+                # 分类正样本（稠密）
+                for (py, px), cls_tgt in cls_pos.items():
+                    flat_cls_targets.append(cls_tgt)
                     flat_cls_logits.append(cls_logits_list[li][b, :, py, px])
-                    flat_bbox_targets.append(data["bbox"])
+
+                # 回归 + centerness 正样本（稀疏：仅最大 IoU 位置）
+                for (py, px), (bbox_tgt, ctr_tgt) in reg_pos.items():
+                    flat_bbox_targets.append(bbox_tgt)
                     flat_bbox_preds.append(bbox_preds_list[li][b, :, py, px])
-                    flat_ctr_targets.append(data["ctr"])
+                    flat_ctr_targets.append(ctr_tgt)
                     flat_ctr_preds.append(centerness_list[li][b, 0, py, px])
 
-                # --- 从该层级采样负样本 ---
-                n_pos = len(pos_data)
+                # --- 从该层级采样负样本（仅用于分类） ---
+                n_pos = len(cls_pos)
                 n_neg = n_pos * num_neg_per_pos
 
                 # 候选负样本：不在任何正样本掩码中的位置
@@ -536,15 +529,6 @@ class LesionDetectionHead(nn.Module):
                         flat_cls_logits.append(
                             cls_logits_list[li][b, :, neg_py[j].item(), neg_px[j].item()]
                         )
-                        # 负样本的占位 bbox/ctr 目标（不用于 reg/ctr 损失）
-                        flat_bbox_targets.append(torch.zeros(4, device=device))
-                        flat_bbox_preds.append(
-                            bbox_preds_list[li][b, :, neg_py[j].item(), neg_px[j].item()]
-                        )
-                        flat_ctr_targets.append(torch.tensor(0.0, device=device))
-                        flat_ctr_preds.append(
-                            centerness_list[li][b, 0, neg_py[j].item(), neg_px[j].item()]
-                        )
 
         # 若整个 batch 无正样本，返回零损失
         if len(flat_cls_targets) == 0:
@@ -554,19 +538,9 @@ class LesionDetectionHead(nn.Module):
                 "loss_det_ctr": torch.tensor(0.0, device=device, requires_grad=True),
             }
 
-        # 堆叠
+        # 分类用 Focal Loss（对所有样本：正 + 负）
         cls_targets_t = torch.stack(flat_cls_targets)      # [N, C]
         cls_logits_t = torch.stack(flat_cls_logits)         # [N, C]
-        bbox_targets_t = torch.stack(flat_bbox_targets)     # [N, 4]
-        bbox_preds_t = torch.stack(flat_bbox_preds)         # [N, 4]
-        ctr_targets_t = torch.stack(flat_ctr_targets)       # [N]
-        ctr_preds_t = torch.stack(flat_ctr_preds)           # [N]
-
-        # 将正负样本分开，用于回归与 centerness 损失
-        is_pos = cls_targets_t.sum(dim=1) > 0  # [N] —— 正样本在 one-hot 中有一个 1
-        n_pos = is_pos.sum().item()
-
-        # 分类用 Focal Loss（对所有样本：正 + 负）
         loss_cls = _focal_loss(
             cls_logits_t,
             cls_targets_t,
@@ -574,17 +548,22 @@ class LesionDetectionHead(nn.Module):
             gamma=self.focal_gamma,
         )
 
-        # 回归 + centerness 损失仅作用于正样本
-        if n_pos > 0:
+        # 回归 + centerness 损失仅作用于最大 IoU 正样本
+        if len(flat_bbox_targets) > 0:
+            bbox_targets_t = torch.stack(flat_bbox_targets)     # [M, 4]
+            bbox_preds_t = torch.stack(flat_bbox_preds)         # [M, 4]
+            ctr_targets_t = torch.stack(flat_ctr_targets)       # [M]
+            ctr_preds_t = torch.stack(flat_ctr_preds)           # [M]
+
             loss_reg = F.smooth_l1_loss(
-                bbox_preds_t[is_pos],
-                bbox_targets_t[is_pos],
+                bbox_preds_t,
+                bbox_targets_t,
                 beta=self.bbox_loss_beta,
             )
             # 用 with_logits 版本：AMP autocast 下安全，且内部 log-sum-exp 数值更稳定
             loss_ctr = F.binary_cross_entropy_with_logits(
-                ctr_preds_t[is_pos].float(),
-                ctr_targets_t[is_pos].float(),
+                ctr_preds_t.float(),
+                ctr_targets_t.float(),
             )
         else:
             loss_reg = torch.tensor(0.0, device=device, requires_grad=True)
@@ -707,6 +686,47 @@ def build_detection_head(
         from models.sam_adapter_head import SAMAdapterHead
         return SAMAdapterHead(in_channels_list, fpn_channels, num_classes)
     raise ValueError(f"Unknown detection head: {name}")
+
+
+def _select_max_iou(
+    bbox_pred: torch.Tensor,      # [4, H, W]，已 detach，格子单位
+    py: torch.Tensor,             # [N] 候选位置 y 下标
+    px: torch.Tensor,             # [N] 候选位置 x 下标
+    cx: torch.Tensor,             # [N] 候选位置中心 x（像素）
+    cy: torch.Tensor,             # [N] 候选位置中心 y（像素）
+    stride: int,
+    gt_box: torch.Tensor,         # [4] = (x1, y1, x2, y2)
+) -> int:
+    """在候选位置里选预测框与 GT 的 IoU 最大的那一个，返回其下标。
+
+    预测框由该位置的回归分支解码：预测距离 × stride 还原到像素坐标。
+    """
+    pred_l = bbox_pred[0, py, px] * stride
+    pred_t = bbox_pred[1, py, px] * stride
+    pred_r = bbox_pred[2, py, px] * stride
+    pred_b = bbox_pred[3, py, px] * stride
+
+    px1 = cx - pred_l
+    py1 = cy - pred_t
+    px2 = cx + pred_r
+    py2 = cy + pred_b
+
+    gx1, gy1, gx2, gy2 = gt_box
+
+    ix1 = torch.maximum(px1, gx1)
+    iy1 = torch.maximum(py1, gy1)
+    ix2 = torch.minimum(px2, gx2)
+    iy2 = torch.minimum(py2, gy2)
+    iw = (ix2 - ix1).clamp(min=0)
+    ih = (iy2 - iy1).clamp(min=0)
+    inter = iw * ih
+
+    area_p = (px2 - px1).clamp(min=0) * (py2 - py1).clamp(min=0)
+    area_g = (gx2 - gx1) * (gy2 - gy1)
+    union = area_p + area_g - inter
+    iou = inter / union.clamp(min=1e-6)
+
+    return int(iou.argmax().item())
 
 
 def _focal_loss(

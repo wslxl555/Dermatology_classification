@@ -49,8 +49,8 @@ from training.trainer import Trainer
 LABELED_TRAIN_CONFIG = {
     **FULL_CONFIG,
     # 数据
-    "image_size": (512, 512),
-    "batch_size": 4,           # 数据量较小，减小 batch
+    "image_size": (1024, 1024),
+    "batch_size": 2,           # 1024px 显存占用大，减小 batch
     "num_workers": 0,          # Windows 兼容
     "augmentation": "medical",
 
