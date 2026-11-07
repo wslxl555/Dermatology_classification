@@ -180,7 +180,7 @@ python evaluate_unlabeled.py --checkpoint compare_detector_fcos_best.pth --unlab
 
 echo ""
 echo ">>> 端到端推理示例（对一张测试图自动标注 + 分类）:"
-python -m inference.auto_annotate --image_dir "$UNLABELED_DIR"/predict/ --conf_threshold 0.3
+python -m inference.auto_annotate --image_dir /workspace/predict/ --conf_threshold 0.3
 
 echo ""
 echo "============================================"

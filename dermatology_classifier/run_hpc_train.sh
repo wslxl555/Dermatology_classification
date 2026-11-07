@@ -144,7 +144,7 @@ echo ">>> Step 1: 多任务训练（$BACKBONE + $DETECTION_HEAD），$EPOCHS epo
 python train.py --image_size 384 --backbone swin_t --epochs 50
 cp outputs/checkpoints/best.pth outputs/checkpoints/compare_detector_fcos_best.pth
 python evaluate.py --checkpoint compare_detector_fcos_best.pth                      # 测试集评估
-python predict.py --dir "$UNLABELED_DIR"/predict/ --checkpoint best.pth
+python predict.py --dir /workspace/predict/ --checkpoint best.pth
 
 echo ""
 echo "============================================"

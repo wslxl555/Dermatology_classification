@@ -36,6 +36,7 @@ migration_*/
 # === Datasets (keep local, not in Git) ===
 labeled/
 unlabeled/
+predict/
 
 # === Old / backup project copies ===
 pre_dermatology_classifier/
