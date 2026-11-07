@@ -187,6 +187,7 @@ class DiseaseDataset(Dataset):
             "image": image,
             "label": DISEASE_TO_IDX[s["disease"]],
             "image_id": Path(s["image_path"]).stem,
+            "patient_id": s["patient_id"],
         }
 
 

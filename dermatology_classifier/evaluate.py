@@ -11,6 +11,7 @@
 import argparse
 import json
 import pickle
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -44,13 +45,15 @@ def collate_fn(batch):
     images = torch.stack([b["image"] for b in batch])
     labels = torch.tensor([b["label"] for b in batch], dtype=torch.long)
     image_ids = [b["image_id"] for b in batch]
-    return {"image": images, "label": labels, "image_id": image_ids}
+    patient_ids = [b["patient_id"] for b in batch]
+    return {"image": images, "label": labels, "image_id": image_ids,
+            "patient_id": patient_ids}
 
 
 @torch.no_grad()
 def evaluate(model, loader, device):
     model.eval()
-    all_labels, all_probs, all_ids = [], [], []
+    all_labels, all_probs, all_ids, all_pids = [], [], [], []
     for batch in loader:
         images = batch["image"].to(device)
         logits = model(images)
@@ -58,9 +61,48 @@ def evaluate(model, loader, device):
         all_probs.append(probs)
         all_labels.append(batch["label"].numpy())
         all_ids.extend(batch["image_id"])
+        all_pids.extend(batch["patient_id"])
     probs = np.concatenate(all_probs, axis=0)
     labels = np.concatenate(all_labels, axis=0)
-    return labels, probs, all_ids
+    return labels, probs, all_ids, all_pids
+
+
+def patient_level_metrics(patient_ids, labels, preds):
+    """患者级评估：同一患者多图先多数投票，再计算患者级指标。
+
+    返回 dict：n_patients / accuracy / macro_f1 / per_class_f1 /
+    confusion_matrix / all_correct_accuracy / all_correct_count。
+    """
+    groups = defaultdict(list)
+    for pid, t, p in zip(patient_ids, labels, preds):
+        groups[(pid, int(t))].append(int(p))
+
+    p_true, p_pred = [], []
+    all_correct = 0
+    n_patients = len(groups)
+    for (pid, t), ps in groups.items():
+        maj = max(set(ps), key=ps.count)
+        p_true.append(t)
+        p_pred.append(maj)
+        if all(p == t for p in ps):
+            all_correct += 1
+
+    p_true = np.asarray(p_true)
+    p_pred = np.asarray(p_pred)
+    acc = accuracy_score(p_true, p_pred)
+    macro_f1 = f1_score(p_true, p_pred, average="macro", zero_division=0)
+    per_class = f1_score(p_true, p_pred, average=None,
+                         labels=list(range(NUM_DISEASE_CLASSES)), zero_division=0)
+    cm = confusion_matrix(p_true, p_pred, labels=list(range(NUM_DISEASE_CLASSES)))
+    return {
+        "n_patients": n_patients,
+        "accuracy": acc,
+        "macro_f1": macro_f1,
+        "per_class_f1": per_class,
+        "confusion_matrix": cm,
+        "all_correct_accuracy": all_correct / max(n_patients, 1),
+        "all_correct_count": all_correct,
+    }
 
 
 def main():
@@ -110,7 +152,7 @@ def main():
     model.load_state_dict(ckpt["model_state_dict"])
     model.eval()
 
-    labels, probs, ids = evaluate(model, loader, device)
+    labels, probs, ids, pids = evaluate(model, loader, device)
     preds = probs.argmax(axis=1)
 
     acc = accuracy_score(labels, preds)
@@ -122,6 +164,7 @@ def main():
     except Exception:
         auc = float("nan")
     cm = confusion_matrix(labels, preds, labels=list(range(NUM_DISEASE_CLASSES)))
+    p_metrics = patient_level_metrics(pids, labels, preds)
 
     print("\n" + "=" * 60)
     print("疾病分类评估结果")
@@ -135,6 +178,23 @@ def main():
     print("\n混淆矩阵 (行=真实, 列=预测):")
     print("            " + " ".join(f"{n:>10}" for n in DISEASE_CLASSES))
     for i, row in enumerate(cm):
+        print(f"  {DISEASE_CLASSES[i]:9s} " + " ".join(f"{v:10d}" for v in row))
+
+    print("\n" + "-" * 60)
+    print(f"患者级评估（多数投票，共 {p_metrics['n_patients']} 名患者）")
+    print("-" * 60)
+    print(f"患者级 Accuracy:      {p_metrics['accuracy']:.4f}")
+    print(f"患者级 Macro F1:      {p_metrics['macro_f1']:.4f}")
+    print(f"全对患者占比 (All-correct): "
+          f"{p_metrics['all_correct_count']}/{p_metrics['n_patients']} = "
+          f"{p_metrics['all_correct_accuracy']:.4f}")
+    print("\n患者级逐类 F1:")
+    for i, name in enumerate(DISEASE_CLASSES):
+        print(f"  {name:22s} ({DISEASE_CLASSES_ZH[name]}): "
+              f"{p_metrics['per_class_f1'][i]:.4f}")
+    print("\n患者级混淆矩阵 (行=真实, 列=预测):")
+    print("            " + " ".join(f"{n:>10}" for n in DISEASE_CLASSES))
+    for i, row in enumerate(p_metrics["confusion_matrix"]):
         print(f"  {DISEASE_CLASSES[i]:9s} " + " ".join(f"{v:10d}" for v in row))
 
     # 逐图预测（可选保存）
@@ -156,6 +216,17 @@ def main():
         "per_class_f1": {DISEASE_CLASSES[i]: float(per_class[i])
                          for i in range(NUM_DISEASE_CLASSES)},
         "confusion_matrix": cm.tolist(),
+        "patient_level": {
+            "n_patients": p_metrics["n_patients"],
+            "accuracy": p_metrics["accuracy"],
+            "macro_f1": p_metrics["macro_f1"],
+            "all_correct_accuracy": p_metrics["all_correct_accuracy"],
+            "all_correct_count": p_metrics["all_correct_count"],
+            "per_class_f1": {DISEASE_CLASSES[i]:
+                             float(p_metrics["per_class_f1"][i])
+                             for i in range(NUM_DISEASE_CLASSES)},
+            "confusion_matrix": p_metrics["confusion_matrix"].tolist(),
+        },
     }
     out = OUTPUT_DIR / "evaluation.json"
     with open(out, "w", encoding="utf-8") as f:
