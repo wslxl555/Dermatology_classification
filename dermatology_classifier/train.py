@@ -47,6 +47,7 @@ def parse_args():
     p.add_argument("--batch_size", type=int, default=DEFAULT_CONFIG["batch_size"])
     p.add_argument("--epochs", type=int, default=DEFAULT_CONFIG["epochs"])
     p.add_argument("--lr", type=float, default=DEFAULT_CONFIG["learning_rate"])
+    p.add_argument("--backbone_lr", type=float, default=DEFAULT_CONFIG["backbone_lr"])
     p.add_argument("--weight_decay", type=float, default=DEFAULT_CONFIG["weight_decay"])
     p.add_argument("--val_size", type=float, default=DEFAULT_CONFIG["val_size"])
     p.add_argument("--test_size", type=float, default=DEFAULT_CONFIG["test_size"])
@@ -55,6 +56,8 @@ def parse_args():
                    default=DEFAULT_CONFIG["augmentation"],
                    choices=["medical", "standard", "none"])
     p.add_argument("--dropout", type=float, default=DEFAULT_CONFIG["dropout"])
+    p.add_argument("--label_smoothing", type=float,
+                   default=DEFAULT_CONFIG["label_smoothing"])
     p.add_argument("--hidden_dim", type=int, default=DEFAULT_CONFIG["hidden_dim"])
     p.add_argument("--patience", type=int,
                    default=DEFAULT_CONFIG["early_stopping_patience"])
@@ -191,14 +194,17 @@ def main():
     head_params = [p for n, p in model.named_parameters() if n.startswith("head.")]
     backbone_params = [p for n, p in model.named_parameters() if not n.startswith("head.")]
     optimizer = torch.optim.AdamW([
-        {"params": backbone_params, "lr": args.lr},
-        {"params": head_params, "lr": args.lr * 10},
+        {"params": backbone_params, "lr": args.backbone_lr},
+        {"params": head_params, "lr": args.lr},
     ], weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 
     class_weights = compute_class_weights(splits["train"], NUM_DISEASE_CLASSES).to(device)
-    criterion = nn.CrossEntropyLoss(weight=class_weights)
+    criterion = nn.CrossEntropyLoss(weight=class_weights,
+                                    label_smoothing=args.label_smoothing)
     print(f"类别权重: {[round(w, 3) for w in class_weights.tolist()]}")
+    print(f"学习率: backbone={args.backbone_lr:.1e}  head={args.lr:.1e}  "
+          f"label_smoothing={args.label_smoothing}")
 
     # ---- 训练 ----
     best_f1, best_epoch, bad_epochs = 0.0, 0, 0

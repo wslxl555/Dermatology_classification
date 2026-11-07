@@ -44,14 +44,16 @@ DEFAULT_CONFIG = {
     "image_size": 224,
     "batch_size": 32,
     "epochs": 30,
-    "learning_rate": 1e-4,
-    "weight_decay": 1e-4,
+    "learning_rate": 1e-4,      # 分类头学习率（从头训练，较大）
+    "backbone_lr": 1e-5,        # 预训练 backbone 微调学习率（较小，防止冲掉特征）
+    "weight_decay": 5e-4,       # 加大 L2 正则，抑制小数据过拟合
+    "label_smoothing": 0.1,     # 标签平滑，缓解过拟合 + 过自信
     "val_size": 0.15,
     "test_size": 0.15,
     "seed": 42,
     "augmentation": "medical",
     "hidden_dim": 512,
-    "dropout": 0.3,
+    "dropout": 0.5,             # 加大 dropout
     "early_stopping_patience": 8,
 }
 
