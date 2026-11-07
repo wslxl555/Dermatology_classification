@@ -43,3 +43,6 @@ pre_dermatology_detection/
 
 # === Logs ===
 *.log
+
+# === Claude Code worktrees ===
+.claude/worktrees/
