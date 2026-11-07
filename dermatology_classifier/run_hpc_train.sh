@@ -140,10 +140,11 @@ echo ""
 echo ">>> Step 1: 多任务训练（$BACKBONE + $DETECTION_HEAD），$EPOCHS epochs @ ${IMAGE_SIZE}px"
 # --test_size 0：labeled/ 全部用于 train/val（不额外切 test），
 # 测试集固定用 unlabeled/（Step 3 评估）。
-python train.py                          # 默认 convnext_tiny / 224px
+#python train.py                          # 默认 convnext_tiny / 224px
 python train.py --image_size 384 --backbone swin_t --epochs 50
-python evaluate.py                       # 测试集评估
-python predict.py --image_dir "$UNLABELED_DIR"/predict/
+cp outputs/checkpoints/best.pth outputs/checkpoints/compare_detector_fcos_best.pth
+python evaluate.py --checkpoint compare_detector_fcos_best.pth                      # 测试集评估
+python predict.py --dir "$UNLABELED_DIR"/predict/ --checkpoint best.pth
 
 echo ""
 echo "============================================"

@@ -141,7 +141,7 @@ echo ">>> Step 1: 多任务训练（$BACKBONE + $DETECTION_HEAD），$EPOCHS epo
 # --test_size 0：labeled/ 全部用于 train/val（不额外切 test），
 # 测试集固定用 unlabeled/（Step 3 评估）。
 python smoke_test_heads.py  
-python train_labeled.py --augmentation tile --detection_head "$DETECTION_HEAD" --image_size "$IMAGE_SIZE" --epochs "$EPOCHS" --batch_size "$BATCH_SIZE" --backbone "$BACKBONE" --test_size 0 $OFFLINE --resume outputs/checkpoints/last.pth
+python train_labeled.py --augmentation tile --detection_head "$DETECTION_HEAD" --image_size "$IMAGE_SIZE" --epochs "$EPOCHS" --batch_size "$BATCH_SIZE" --backbone "$BACKBONE" --test_size 0 $OFFLINE #--resume outputs/checkpoints/last.pth
 cp outputs/checkpoints/best.pth outputs/checkpoints/compare_detector_fcos_best.pth
 
 # =============================================================================
