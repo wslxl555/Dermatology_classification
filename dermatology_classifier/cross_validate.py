@@ -152,7 +152,7 @@ def main():
           f"dropout={args.dropout}  weight_decay={args.weight_decay:.1e}")
 
     img_accs, img_f1s, img_aucs = [], [], []
-    pat_accs, pat_f1s, pat_allc = [], [], []
+    pat_accs, pat_f1s, pat_allc, pat_aucs = [], [], [], []
 
     for fold_idx, (tr, va) in enumerate(folds):
         print(f"\n--- Fold {fold_idx+1}/{args.folds}: "
@@ -162,7 +162,7 @@ def main():
         preds = va_probs.argmax(axis=1)
 
         img_m = compute_metrics(va_labels, va_probs)
-        pat_m = patient_level_metrics(va_pids, va_labels, preds)
+        pat_m = patient_level_metrics(va_pids, va_labels, preds, probs=va_probs)
 
         img_accs.append(img_m["acc"])
         img_f1s.append(img_m["macro_f1"])
@@ -170,12 +170,13 @@ def main():
         pat_accs.append(pat_m["accuracy"])
         pat_f1s.append(pat_m["macro_f1"])
         pat_allc.append(pat_m["all_correct_accuracy"])
+        pat_aucs.append(pat_m["auc"])
 
         print(f"  best val macro-F1: {best_f1:.4f}")
         print(f"  图像级: Acc {img_m['acc']:.4f} | Macro-F1 {img_m['macro_f1']:.4f} "
               f"| AUC {img_m['auc']:.4f}")
         print(f"  患者级: Acc {pat_m['accuracy']:.4f} | Macro-F1 {pat_m['macro_f1']:.4f} "
-              f"| 全对占比 {pat_m['all_correct_accuracy']:.4f}")
+              f"| AUC {pat_m['auc']:.4f} | 全对占比 {pat_m['all_correct_accuracy']:.4f}")
 
     def mean_std(xs):
         xs = np.asarray(xs, dtype=float)
@@ -185,7 +186,8 @@ def main():
     rows = [
         ("图像级 Accuracy", img_accs), ("图像级 Macro-F1", img_f1s),
         ("图像级 AUC", img_aucs), ("患者级 Accuracy", pat_accs),
-        ("患者级 Macro-F1", pat_f1s), ("患者级 全对占比", pat_allc),
+        ("患者级 Macro-F1", pat_f1s), ("患者级 AUC", pat_aucs),
+        ("患者级 全对占比", pat_allc),
     ]
     for name, xs in rows:
         m, s = mean_std(xs)

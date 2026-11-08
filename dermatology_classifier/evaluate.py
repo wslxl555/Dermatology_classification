@@ -67,25 +67,35 @@ def evaluate(model, loader, device):
     return labels, probs, all_ids, all_pids
 
 
-def patient_level_metrics(patient_ids, labels, preds):
-    """患者级评估：同一患者多图先多数投票，再计算患者级指标。
+def patient_level_metrics(patient_ids, labels, preds, probs=None):
+    """患者级评估：同一患者多图先聚合，再计算患者级指标。
 
-    返回 dict：n_patients / accuracy / macro_f1 / per_class_f1 /
-    confusion_matrix / all_correct_accuracy / all_correct_count。
+    硬预测多数投票；若传入 probs（N×C），患者级概率取均值，用于计算患者级 AUC。
+
+    返回 dict：n_patients / accuracy / macro_f1 / per_class_f1 / confusion_matrix /
+    all_correct_accuracy / all_correct_count / auc。
     """
-    groups = defaultdict(list)
+    groups = defaultdict(lambda: {"true": None, "preds": [], "probs": []})
     for pid, t, p in zip(patient_ids, labels, preds):
-        groups[(pid, int(t))].append(int(p))
+        g = groups[(pid, int(t))]
+        g["true"] = int(t)
+        g["preds"].append(int(p))
+    if probs is not None:
+        for (pid, t), pr in zip(zip(patient_ids, labels), probs):
+            groups[(pid, int(t))]["probs"].append(pr)
 
-    p_true, p_pred = [], []
+    p_true, p_pred, p_probs = [], [], []
     all_correct = 0
     n_patients = len(groups)
-    for (pid, t), ps in groups.items():
+    for g in groups.values():
+        ps = g["preds"]
         maj = max(set(ps), key=ps.count)
-        p_true.append(t)
+        p_true.append(g["true"])
         p_pred.append(maj)
-        if all(p == t for p in ps):
+        if all(p == g["true"] for p in ps):
             all_correct += 1
+        if g["probs"]:
+            p_probs.append(np.mean(g["probs"], axis=0))
 
     p_true = np.asarray(p_true)
     p_pred = np.asarray(p_pred)
@@ -94,6 +104,15 @@ def patient_level_metrics(patient_ids, labels, preds):
     per_class = f1_score(p_true, p_pred, average=None,
                          labels=list(range(NUM_DISEASE_CLASSES)), zero_division=0)
     cm = confusion_matrix(p_true, p_pred, labels=list(range(NUM_DISEASE_CLASSES)))
+
+    auc = float("nan")
+    if probs is not None and len(p_probs) == n_patients:
+        try:
+            auc = roc_auc_score(p_true, np.stack(p_probs),
+                                multi_class="ovr", average="macro")
+        except Exception:
+            auc = float("nan")
+
     return {
         "n_patients": n_patients,
         "accuracy": acc,
@@ -102,6 +121,7 @@ def patient_level_metrics(patient_ids, labels, preds):
         "confusion_matrix": cm,
         "all_correct_accuracy": all_correct / max(n_patients, 1),
         "all_correct_count": all_correct,
+        "auc": auc,
     }
 
 
@@ -164,7 +184,7 @@ def main():
     except Exception:
         auc = float("nan")
     cm = confusion_matrix(labels, preds, labels=list(range(NUM_DISEASE_CLASSES)))
-    p_metrics = patient_level_metrics(pids, labels, preds)
+    p_metrics = patient_level_metrics(pids, labels, preds, probs=probs)
 
     print("\n" + "=" * 60)
     print("疾病分类评估结果")
@@ -185,6 +205,7 @@ def main():
     print("-" * 60)
     print(f"患者级 Accuracy:      {p_metrics['accuracy']:.4f}")
     print(f"患者级 Macro F1:      {p_metrics['macro_f1']:.4f}")
+    print(f"患者级 AUC:           {p_metrics['auc']:.4f}")
     print(f"全对患者占比 (All-correct): "
           f"{p_metrics['all_correct_count']}/{p_metrics['n_patients']} = "
           f"{p_metrics['all_correct_accuracy']:.4f}")
@@ -220,6 +241,7 @@ def main():
             "n_patients": p_metrics["n_patients"],
             "accuracy": p_metrics["accuracy"],
             "macro_f1": p_metrics["macro_f1"],
+            "auc": p_metrics["auc"],
             "all_correct_accuracy": p_metrics["all_correct_accuracy"],
             "all_correct_count": p_metrics["all_correct_count"],
             "per_class_f1": {DISEASE_CLASSES[i]:
