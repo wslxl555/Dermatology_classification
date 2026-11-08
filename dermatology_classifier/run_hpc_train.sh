@@ -3,6 +3,7 @@
 # 皮肤病「纯疾病三分类」训练 + 评估脚本（dermatology_classifier）
 # -----------------------------------------------------------------------------
 # 完整流程：
+#   Step 0  标签清洗（荨麻疹审核，可选隔离）            —— clean_urticaria_labels.py
 #   Step 1  训练三分类模型（预训练 backbone 微调）      —— train.py
 #   Step 2  测试集评估（图像级 + 患者级）                —— evaluate.py
 #   Step 3  患者级 5-fold 交叉验证（稳健估计 mean±std） —— cross_validate.py
@@ -40,6 +41,8 @@ IMAGE_SIZE=384
 EPOCHS=50
 CV_EPOCHS=30
 FOLDS=5
+CLEAN_MOVE=0               # 1=把「需复核」样本隔离到 QUARANTINE_DIR，0=只生成报告
+QUARANTINE_DIR=/workspace/quarantine_urticaria
 
 set -e  # 任一步出错立即终止，便于尽早暴露问题
 
@@ -102,6 +105,20 @@ else
     echo "[警告] 未找到缓存权重: $CACHE_FILE"
     echo "       建议先在有网的节点执行上面的预缓存命令。"
     echo "       本次将尝试联网加载；若节点无外网，会退化为随机初始化。"
+fi
+
+# =============================================================================
+# Step 0：标签清洗（荨麻疹审核，训练前执行）
+#   默认只生成报告 outputs/urticaria_review.csv，供人工复核。
+#   把 CLEAN_MOVE 设为 1 时，会把「需复核」样本隔离到 QUARANTINE_DIR，
+#   之后训练/评估会自动使用清洗后的数据。
+# =============================================================================
+echo ""
+echo ">>> Step 0: 标签清洗（荨麻疹审核）"
+python clean_urticaria_labels.py --disease 荨麻疹 \
+    --write-csv outputs/urticaria_review.csv
+if [ "$CLEAN_MOVE" = "1" ]; then
+    python clean_urticaria_labels.py --disease 荨麻疹 --move "$QUARANTINE_DIR"
 fi
 
 # =============================================================================

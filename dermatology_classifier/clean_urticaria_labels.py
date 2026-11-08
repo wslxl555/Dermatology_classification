@@ -20,11 +20,13 @@
 用法:
     python clean_urticaria_labels.py
     python clean_urticaria_labels.py --write-csv outputs/urticaria_review.csv
+    python clean_urticaria_labels.py --move outputs/quarantine_urticaria   # 隔离需复核样本
     python clean_urticaria_labels.py --disease 湿疹   # 也可对其他疾病目录跑
 """
 
 import argparse
 import csv
+import shutil
 from collections import Counter
 from pathlib import Path
 
@@ -51,6 +53,8 @@ def parse_args():
     p.add_argument("--unlabeled_root", type=str, default=str(UNLABELED_ROOT))
     p.add_argument("--write-csv", type=str, default=None,
                    help="可选：把全部样本分类结果写到 CSV 路径")
+    p.add_argument("--move", type=str, default=None,
+                   help="可选：把「需复核」样本移动到该目录（隔离，供人工复核）")
     return p.parse_args()
 
 
@@ -130,7 +134,7 @@ def main():
             "review": "; ".join(reasons),
         })
         if reasons:
-            review.append((source, name, subtype, "; ".join(reasons)))
+            review.append((source, name, subtype, "; ".join(reasons), path))
 
     # ---- 打印统计 ----
     print(f"\n{'='*60}")
@@ -152,7 +156,7 @@ def main():
         print(f"\n{'='*60}")
         print("需人工复核样本清单:")
         print(f"{'='*60}")
-        for source, name, subtype, reason in review:
+        for source, name, subtype, reason, _path in review:
             print(f"  [{source}] {name}")
             print(f"         -> {subtype} | {reason}")
 
@@ -167,6 +171,17 @@ def main():
             writer.writeheader()
             writer.writerows(rows)
         print(f"\nCSV 已保存: {out}")
+
+    # ---- 可选移动（隔离）需复核样本 ----
+    if args.move:
+        dest = Path(args.move)
+        moved = 0
+        for source, name, subtype, reason, path in review:
+            dst = dest / source / disease_cn / name
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(path, str(dst))
+            moved += 1
+        print(f"\n已移动 {moved} 张需复核样本到: {dest}")
 
 
 if __name__ == "__main__":
