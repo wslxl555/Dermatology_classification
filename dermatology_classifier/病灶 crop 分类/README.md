@@ -23,6 +23,30 @@
 - `lesion_crops.py`：核心工具——解析 LabelMe JSON、裁剪病灶、形态标签解析。
 - `train_lesion_classifier.py`：训练 crop 形态分类器（复用 `model.build_model` / `train.run_epoch`）。
 - `predict_by_lesions.py`：形态直方图 → 疾病（逻辑回归 + 患者级 CV）。
+- `late_fusion.py`：晚融合对照实验——CNN 特征 / 形态直方图 / 两者拼接，患者级 5-fold 对拍。
+  - 默认用冻结 ImageNet backbone（无泄漏）；`--checkpoint best.pth` 改用微调模型（上界）。
+- `run_fusion.sh`：一键跑完整融合流程（见下）。
+
+## 一键运行
+
+```bash
+cd "病灶 crop 分类"
+bash run_fusion.sh
+```
+
+流程：整图 CNN 训练（已有 best.pth 则跳过）→ 病灶形态分类器 → 晚融合对照（冻结 + 微调两种）
+→ 两段式疾病预测。
+
+## 已得结论（冻结 swin_t + GT 形态，患者级 5-fold CV）
+
+| 模型 | Accuracy | Macro-F1 | AUC |
+|---|---|---|---|
+| CNN 特征（冻结） | 0.7909 | 0.7999 | 0.9039 |
+| 形态直方图（GT） | 0.8045 | 0.8199 | 0.9170 |
+| **CNN+形态（晚融合）** | **0.8273** | **0.8366** | **0.9400** |
+
+形态是视觉特征之外的**互补信息**（融合同时超过两者）。用微调 CNN 的融合见 `late_fusion.py --checkpoint`。
+
 
 ## 用法
 

@@ -4,20 +4,20 @@
 在【同一患者级】5-fold 划分上，用逻辑回归对比三种输入，看形态是否在视觉特征
 之外提供互补信息：
 
-  1) CNN 特征        —— 冻结 ImageNet backbone 提的视觉特征
+  1) CNN 特征        —— 视觉特征（默认冻结 ImageNet backbone；--checkpoint 改用微调模型）
   2) 病灶形态直方图   —— GT 形态标签的比例（上界）
   3) CNN + 形态(晚融合) —— 把两者拼接
 
 关键设计：
-  - 特征提取用【冻结的 ImageNet backbone】，不参与训练 → 任何划分都无数据泄漏。
-  - 三种模型都用逻辑回归 + StandardScaler，保证公平对比。
+  - 默认用【冻结的 ImageNet backbone】提特征，不参与训练 → 任何划分都无数据泄漏。
+  - 传 --checkpoint 时改用【微调后的整图 CNN】提特征（注意：该模型见过这些图，属上界、
+    有轻微泄漏，用于看融合对微调模型能涨多少）。
+  - 三种模型都用逻辑回归 + StandardScaler，公平对比。
   - 患者级聚合：同一患者多图的特征/直方图取均值，再按患者做 5-fold CV。
-
-注意：这里用的是冻结 backbone（非你微调后的 swin_t），所以 CNN 特征那行是
-「通用视觉特征」的下界；但结论（形态是否互补）对微调模型同样成立。
 
 用法:
     python late_fusion.py --backbone swin_t --image_size 224 --offline
+    python late_fusion.py --checkpoint ../outputs/checkpoints/best.pth
 """
 
 import argparse
@@ -56,12 +56,27 @@ def parse_args():
     p.add_argument("--backbone", type=str, default=DEFAULT_CONFIG["backbone"],
                    choices=BACKBONE_NAMES)
     p.add_argument("--image_size", type=int, default=DEFAULT_CONFIG["image_size"])
+    p.add_argument("--checkpoint", type=str, default=None,
+                   help="可选：用微调后的整图 CNN checkpoint 提特征（而非冻结 ImageNet）")
     p.add_argument("--min_size", type=int, default=8)
     p.add_argument("--folds", type=int, default=5)
     p.add_argument("--seed", type=int, default=DEFAULT_CONFIG["seed"])
     p.add_argument("--offline", action="store_true")
     p.add_argument("--device", type=str, default=None)
     return p.parse_args()
+
+
+def load_feature_extractor(ckpt_path, device):
+    """加载微调后的整图 CNN，返回 (model, image_size)。"""
+    ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+    cfg = ckpt.get("config", {})
+    backbone = cfg.get("backbone", DEFAULT_CONFIG["backbone"])
+    image_size = cfg.get("image_size", DEFAULT_CONFIG["image_size"])
+    model = build_model(backbone_name=backbone, num_classes=NUM_DISEASE_CLASSES,
+                        pretrained=False).to(device)
+    model.load_state_dict(ckpt["model_state_dict"])
+    model.eval()
+    return model, image_size
 
 
 @torch.no_grad()
@@ -153,12 +168,19 @@ def main():
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    model = build_model(backbone_name=args.backbone, num_classes=NUM_DISEASE_CLASSES,
-                        pretrained=True, offline=args.offline).to(device)
-    model.eval()
-    tf = get_val_transforms(args.image_size)
+    if args.checkpoint:
+        model, image_size = load_feature_extractor(args.checkpoint, device)
+        mode = f"微调 CNN（{args.checkpoint}）"
+    else:
+        model = build_model(backbone_name=args.backbone,
+                            num_classes=NUM_DISEASE_CLASSES,
+                            pretrained=True, offline=args.offline).to(device)
+        model.eval()
+        image_size = args.image_size
+        mode = f"冻结 {args.backbone} @ {image_size}px"
+    tf = get_val_transforms(image_size)
 
-    print(f"提取特征（冻结 {args.backbone} @ {args.image_size}px）...")
+    print(f"提取特征（{mode}）...")
     records = build_records(args, model, tf, device)
     X_cnn, X_morph, y = aggregate_by_patient(records)
     print(f"共 {len(records)} 张标注图，{len(y)} 名患者，"
