@@ -1,31 +1,31 @@
 #!/bin/bash
 # =============================================================================
-# ππΩ®æµœÒ +  æ¿˝‘À––
-# ”√∑®£∫∞—±æΩ≈±æ°¢Dockerfile°¢dermatology_classifier.tar.gz ∑≈‘⁄Õ¨“ªƒø¬º£¨
-#       »ª∫Û bash build_and_run.sh
+# ÊûÑÂª∫ÈïúÂÉè + Á§∫‰æãËøêË°å
+# Áî®Ê≥ïÔºöÊääÊú¨ËÑöÊú¨„ÄÅDockerfile„ÄÅdermatology_classifier.tar.gz ÊîæÂú®Âêå‰∏ÄÁõÆÂΩïÔºå
+#       ÁÑ∂Âêé bash build_and_run.sh
 # =============================================================================
 set -e
 
 IMAGE=dermatology_env:latest
-# °Ô ∏ƒ≥… Docker ∑˛ŒÒ∆˜…œœÓƒøƒø¬ºµƒ µº ¬∑æ∂£®—µ¡∑ ±“™π“‘ÿΩ¯»›∆˜£©
+# ‚òÖ ÊîπÊàê Docker ÊúçÂä°Âô®‰∏äÈ°πÁõÆÁõÆÂΩïÁöÑÂÆûÈôÖË∑ØÂæÑÔºàËÆ≠ÁªÉÊó∂Ë¶ÅÊåÇËΩΩËøõÂÆπÂô®Ôºâ
 PROJECT_DIR=/root/wslxl555/Dermatology_classification
 
-# 1) ππΩ®æµœÒ
-echo ">>> ππΩ®æµœÒ $IMAGE ..."
+# 1) ÊûÑÂª∫ÈïúÂÉè
+echo ">>> ÊûÑÂª∫ÈïúÂÉè $IMAGE ..."
 #docker build -t "$IMAGE" .
 
-# 2) —È÷§ª∑æ≥£®¥Ú”° python / torch / CUDA  «∑Òø…”√£©
-echo ">>> —È÷§ª∑æ≥ ..."
+# 2) È™åËØÅÁéØÂ¢ÉÔºàÊâìÂç∞ python / torch / CUDA ÊòØÂê¶ÂèØÁî®Ôºâ
+echo ">>> È™åËØÅÁéØÂ¢É ..."
 #docker run --rm "$IMAGE" bash -lc \
 #    "source /opt/conda/bin/activate && \
 #     python -c 'import torch; print(\"torch\", torch.__version__, \"cuda\", torch.cuda.is_available())'"
 
-# 3) ≈‹—µ¡∑£®GPU ÷±Õ® + π“‘ÿœÓƒø”Î ˝æ›ƒø¬º£©
-echo ">>> ‘À––—µ¡∑ ..."
+# 3) Ë∑ëËÆ≠ÁªÉÔºàGPU Áõ¥ÈÄö + ÊåÇËΩΩÈ°πÁõÆ‰∏éÊï∞ÊçÆÁõÆÂΩïÔºâ
+echo ">>> ËøêË°åËÆ≠ÁªÉ ..."
 docker run --gpus all -d --name train03 \
     -v "$PROJECT_DIR":/workspace \
     -v /root/.cache/torch/hub/checkpoints:/root/.cache/torch/hub/checkpoints \
     "$IMAGE" \
     bash -lc "source /opt/conda/bin/activate && \
               cd /workspace/dermatology_classifier/crop_classifier && \
-              bash run_fusion.sh"
+              bash run_hpc_fusion.sh"
