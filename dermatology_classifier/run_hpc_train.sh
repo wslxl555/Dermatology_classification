@@ -8,6 +8,8 @@
 #   Step 2  测试集评估（图像级 + 患者级）                —— evaluate.py
 #   Step 3  患者级 5-fold 交叉验证（稳健估计 mean±std） —— cross_validate.py
 #   Step 4  文件夹批量预测                              —— predict.py
+#   Step 5  训练病灶检测器（可解释性，检测头可切换）     —— detector/train_detector.py
+#   Step 6  可解释性推理（分类 + 检测 + 病灶特征描述）   —— detector/predict_interpretable.py
 #
 # 用法：
 #   sbatch run_hpc_train.sh     # 提交到调度器（推荐）
@@ -43,6 +45,9 @@ CV_EPOCHS=30
 FOLDS=5
 CLEAN_MOVE=0               # 1=把「需复核」样本隔离到 QUARANTINE_DIR，0=只生成报告
 QUARANTINE_DIR=/workspace/quarantine_urticaria
+DETECTION_HEAD=fcos        # 病灶检测头：faster_rcnn / retinanet / fcos（可切换）
+DET_IMAGE_SIZE=512
+DET_EPOCHS=20
 
 set -e  # 任一步出错立即终止，便于尽早暴露问题
 
@@ -107,6 +112,17 @@ else
     echo "       本次将尝试联网加载；若节点无外网，会退化为随机初始化。"
 fi
 
+# 检测器（torchvision detection）用的 ResNet50 权重缓存
+DET_CACHE_FILE="$CACHE_DIR/resnet50-0676ba61.pth"
+DET_OFFLINE=""
+if [ -f "$DET_CACHE_FILE" ]; then
+    DET_OFFLINE="--offline"
+    echo "检测器 ResNet50 权重已缓存，使用 --offline。"
+else
+    echo "[警告] 未找到检测器 ResNet50 缓存权重: $DET_CACHE_FILE"
+    echo "       建议先缓存: python -c \"from torchvision.models import resnet50, ResNet50_Weights; resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)\""
+fi
+
 # =============================================================================
 # Step 0：标签清洗（荨麻疹审核，训练前执行）
 #   默认只生成报告 outputs/urticaria_review.csv，供人工复核。
@@ -150,6 +166,21 @@ python cross_validate.py --backbone "$BACKBONE" --image_size "$IMAGE_SIZE" \
 echo ""
 echo ">>> Step 4: 批量预测 $PREDICT_DIR"
 python predict.py --dir "$PREDICT_DIR" --checkpoint best.pth
+
+# =============================================================================
+# Step 5：训练病灶检测器（可解释性；检测头可切换）
+# =============================================================================
+echo ""
+echo ">>> Step 5: 训练病灶检测器（$DETECTION_HEAD @ ${DET_IMAGE_SIZE}px, $DET_EPOCHS epochs）"
+python detector/train_detector.py --head "$DETECTION_HEAD" \
+    --image_size "$DET_IMAGE_SIZE" --epochs "$DET_EPOCHS" $DET_OFFLINE
+
+# =============================================================================
+# Step 6：可解释性推理（分类 + 检测 + 病灶特征描述）
+# =============================================================================
+echo ""
+echo ">>> Step 6: 可解释性推理（分类 + 检测 + 病灶特征）"
+python detector/predict_interpretable.py --dir "$PREDICT_DIR"
 
 echo ""
 echo "============================================"

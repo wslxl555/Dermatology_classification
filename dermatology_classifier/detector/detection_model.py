@@ -199,3 +199,16 @@ def collate_fn(batch):
     images = [b[0] for b in batch]
     targets = [b[1] for b in batch]
     return images, targets
+
+
+# =============================================================================
+# 分割式检测头（attention_unet / mamba / sam_adapter / transunet / transcascade）
+# =============================================================================
+# 这些是「分割式检测」头（bbox 渲染成 mask 弱监督分割，推理时连通域转回框），
+# 已在 dermatology_detection 工程实现并可通过 train_labeled.py --detection_head 切换。
+#
+# 由于两个工程都有顶层 config.py / models/ 等模块，跨进程 import 会发生模块名冲突，
+# 因此这里【不】直接 import，改用子进程桥接（见 detector/train_segmentation.py）。
+SEGMENTATION_HEAD_NAMES = [
+    "attention_unet", "mamba", "sam_adapter", "transunet", "transcascade",
+]

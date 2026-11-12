@@ -1,11 +1,11 @@
 """
-可解释性推理：整图疾病分类 + 病灶检测，联合输出。
+可解释性推理：整图疾病分类 + 病灶检测，联合输出（含病灶特征描述）。
 
 对一张图同时跑：
   1) 疾病分类器（outputs/checkpoints/best.pth）→ 病种 + 概率
-  2) 病灶检测器（outputs/checkpoints/lesion_detector.pth）→ 检出哪些病灶、几个、在哪
+  2) 病灶检测器（outputs/checkpoints/lesion_detector.pth，检测头）→ 检出哪些病灶
 
-并给出「关键病灶是否与预测一致」的解释说明。
+并为每个检出的病灶输出【大小 / 形状 / 颜色 / 纹理】描述，支撑"为什么判这个病"。
 
 用法:
     python detector/predict_interpretable.py --image path/to/img.jpg
@@ -14,6 +14,7 @@
 
 import argparse
 import sys
+from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -29,15 +30,17 @@ from model import build_model
 from detector.detection_model import (
     DETECTION_CLASSES, DETECTION_CLASSES_ZH, build_detector,
 )
+from detector.lesion_features import describe_lesion_full
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
 
-# 每种疾病的关键病灶（用于解释一致性）
 DISEASE_KEY_LESIONS = {
     "bullous_pemphigoid": ["bulla", "vesicle"],
     "eczema": ["scale", "vesicle", "erosion", "crust"],
     "urticaria": ["papule", "plaque", "patch"],
 }
+
+MAX_DESCRIBED = 8  # 最多逐病灶详细描述几个
 
 
 def parse_args():
@@ -62,7 +65,7 @@ def load_classifier(ckpt_path, device):
                         pretrained=False).to(device)
     model.load_state_dict(ckpt["model_state_dict"])
     model.eval()
-    return model, get_val_transforms(image_size), image_size
+    return model, get_val_transforms(image_size)
 
 
 def load_detector(ckpt_path, device):
@@ -92,16 +95,13 @@ def classify_image(cls_model, cls_tf, device, image):
 def detect_image(det_model, det_size, device, image):
     h, w = image.shape[:2]
     resized = cv2.resize(image, (det_size, det_size))
-    tensor = torch.from_numpy(resized.transpose(2, 0, 1)).float().unsqueeze(0) / 255.0
-    tensor = tensor.to(device)
+    tensor = torch.from_numpy(resized.transpose(2, 0, 1)).float() / 255.0
     with torch.no_grad():
-        pred = det_model([tensor])[0]
-    # 把框坐标映射回原图
+        pred = det_model([tensor.to(device)])[0]
     sx, sy = w / det_size, h / det_size
-    boxes = pred["boxes"].cpu().numpy()
+    boxes = pred["boxes"].cpu().numpy() * np.array([sx, sy, sx, sy])
     labels = pred["labels"].cpu().numpy()
     scores = pred["scores"].cpu().numpy()
-    boxes = boxes * np.array([sx, sy, sx, sy])
     return boxes, labels, scores
 
 
@@ -129,10 +129,9 @@ def report_image(image_path, cls_model, cls_tf, det_model, det_size, device,
         marker = "  <-- 预测" if i == pred else ""
         print(f"  {name:22s} ({DISEASE_CLASSES_ZH[name]}): {probs[i]:.4f}{marker}")
 
-    print(f"\n病灶检测（置信度>{score_thresh}）:")
-    from collections import Counter
     keep = scores >= score_thresh
     det_classes = set()
+    print(f"\n病灶检测（置信度>{score_thresh}）:")
     if keep.sum() == 0:
         print("  （未检出病灶）")
     else:
@@ -146,6 +145,20 @@ def report_image(image_path, cls_model, cls_tf, det_model, det_size, device,
                 print(f"  {name:12s} ({DETECTION_CLASSES_ZH[name]}): "
                       f"{counts[name]} 处")
 
+    # 逐病灶特征描述（大小/形状/颜色/纹理）
+    idx = np.where(keep)[0]
+    if len(idx) > 0:
+        order = idx[np.argsort(-scores[idx])]  # 按置信度降序
+        print(f"\n病灶特征描述（前 {min(len(order), MAX_DESCRIBED)} 个）:")
+        for k, i in enumerate(order[:MAX_DESCRIBED]):
+            name = DETECTION_CLASSES[labels[i] - 1]
+            f = describe_lesion_full(image, boxes[i])
+            if f is None:
+                continue
+            print(f"  {name:10s} #{k+1}: 置信度 {scores[i]:.2f}")
+            print(f"            {f['desc']}  "
+                  f"(宽{f['width']}×高{f['height']}px, 占图{f['rel_area']*100:.2f}%)")
+
     print(f"\n解释: {interpret(pred, det_classes)}")
 
 
@@ -153,7 +166,7 @@ def main():
     args = parse_args()
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
 
-    cls_model, cls_tf, _ = load_classifier(args.classifier, device)
+    cls_model, cls_tf = load_classifier(args.classifier, device)
     det_model, det_size = load_detector(args.detector, device)
     print(f"分类器: {args.classifier}")
     print(f"检测器: {args.detector} (输入 {det_size}px)")
