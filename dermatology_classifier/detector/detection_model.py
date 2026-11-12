@@ -14,6 +14,7 @@
 """
 
 import sys
+import warnings
 from pathlib import Path
 
 import cv2
@@ -80,20 +81,20 @@ def map_label_to_class(raw_label: str) -> int:
 # =============================================================================
 # 可切换检测头工厂
 # =============================================================================
-def build_detector(head: str, num_classes: int = NUM_MODEL_CLASSES,
-                   offline: bool = False):
-    """构建 torchvision 检测模型。num_classes 含背景（= 前景数 + 1）。
+def _is_network_error(e: Exception) -> bool:
+    msg = str(e).lower()
+    return any(k in msg for k in (
+        "name or service not known", "getaddrinfo", "urlopen error",
+        "connection refused", "network is unreachable",
+        "temporary failure in name resolution", "timed out",
+    ))
 
-    返回模型后，label 约定为：背景 = 0，前景 = 1..N。
-    """
+
+def _build_detector_head(head, num_classes, backbone_weights):
+    """按 head 名构建 torchvision 检测模型（backbone 权重由调用方决定）。"""
     from torchvision.models.detection import (
         fasterrcnn_resnet50_fpn_v2, retinanet_resnet50_fpn_v2, fcos_resnet50_fpn,
     )
-    from torchvision.models import ResNet50_Weights
-
-    head = head.lower()
-    backbone_weights = ResNet50_Weights.IMAGENET1K_V1
-
     if head in ("faster_rcnn", "fasterrcnn", "faster-rcnn"):
         return fasterrcnn_resnet50_fpn_v2(
             weights=None, weights_backbone=backbone_weights, num_classes=num_classes)
@@ -105,6 +106,31 @@ def build_detector(head: str, num_classes: int = NUM_MODEL_CLASSES,
             weights=None, weights_backbone=backbone_weights, num_classes=num_classes)
     raise ValueError(f"Unknown detection head: {head} "
                      f"(可选: {DETECTION_HEAD_NAMES})")
+
+
+def build_detector(head: str, num_classes: int = NUM_MODEL_CLASSES,
+                   offline: bool = False):
+    """构建 torchvision 检测模型。num_classes 含背景（= 前景数 + 1）。
+
+    返回模型后，label 约定为：背景 = 0，前景 = 1..N。
+
+    offline=True 时优先用缓存的 ResNet50 权重；缓存不存在或联网失败时，
+    回退到随机初始化 backbone（与分类器 _build_pretrained 行为一致）。
+    """
+    from torchvision.models import ResNet50_Weights
+
+    head = head.lower()
+    backbone_weights = ResNet50_Weights.IMAGENET1K_V1
+    try:
+        return _build_detector_head(head, num_classes, backbone_weights)
+    except Exception as e:
+        if offline or _is_network_error(e):
+            warnings.warn(
+                "无法联网加载检测器 ResNet50 预训练权重，回退到随机初始化。"
+                "（可在有网环境先运行一次以缓存权重）"
+            )
+            return _build_detector_head(head, num_classes, None)
+        raise
 
 
 # =============================================================================
