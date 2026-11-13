@@ -19,20 +19,22 @@
 import re
 
 # =============================================================================
-# 标准化皮损类别(9 类 = 8 个高频类 + "other")
+# 标准化皮损类别(10 类 = 9 个高频类 + "other")
 # =============================================================================
-# 低频类别 nodule / bulla / pustule / excoriation / scar / lichenification /
+# 低频类别 nodule / pustule / excoriation / scar / lichenification /
 # fissure 在标注中样本极少,单独建模会拖累检测 mAP,统一合并为 "other"。
+# 注意:bulla(大疱) 是类天疱疹的关键诊断信号,单独保留(不并入 other)。
 LESION_CLASSES = [
     "macule",          # 斑疹
     "patch",           # 斑片
     "papule",          # 丘疹
     "plaque",          # 斑块
     "vesicle",         # 水疱
+    "bulla",           # 大疱
     "scale",           # 鳞屑
     "crust",           # 痂
     "erosion",         # 糜烂
-    "other",           # 其他(结节/大疱/脓疱/抓痕/瘢痕/苔藓化/皲裂)
+    "other",           # 其他(结节/脓疱/抓痕/瘢痕/苔藓化/皲裂)
 ]
 
 LESION_CLASS_TO_IDX = {name: idx for idx, name in enumerate(LESION_CLASSES)}
@@ -53,7 +55,7 @@ ZH_TO_EN_BASE = {
     "糜烂": "erosion",
     # 低频皮损 → 合并为 other
     "结节": "other",
-    "大疱": "other",
+    "大疱": "bulla",   # 类天疱疹关键信号，单独保留
     "脓疱": "other",
     "抓痕": "other",
     "瘢痕": "other",
@@ -122,7 +124,7 @@ EN_BASE_TO_CLASS = {
     "Crust": "crust",
     "Erosion": "erosion",
     "Nodule": "other",
-    "Bulla": "other",
+    "Bulla": "bulla",   # 类天疱疹关键信号，单独保留
     "Pustule": "other",
     "Excoriation": "other",
     "Scar": "other",

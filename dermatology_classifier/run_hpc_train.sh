@@ -45,7 +45,8 @@ CV_EPOCHS=30
 FOLDS=5
 CLEAN_MOVE=0               # 1=把「需复核」样本隔离到 QUARANTINE_DIR，0=只生成报告
 QUARANTINE_DIR=/workspace/quarantine_urticaria
-DETECTION_HEAD=fcos        # 病灶检测头：faster_rcnn / retinanet / fcos（可切换）
+DETECTION_HEAD=sam_adapter  # 病灶检测头：sam_adapter（分割式，推荐）/ fcos / faster_rcnn / retinanet
+DET_BACKBONE=convnext_tiny  # 分割式检测头的 backbone（train_segmentation.py 桥接）
 DET_IMAGE_SIZE=512
 DET_EPOCHS=20
 
@@ -112,15 +113,18 @@ else
     echo "       本次将尝试联网加载；若节点无外网，会退化为随机初始化。"
 fi
 
-# 检测器（torchvision detection）用的 ResNet50 权重缓存
-DET_CACHE_FILE="$CACHE_DIR/resnet50-0676ba61.pth"
+# 检测器（分割式检测头，backbone 默认 convnext_tiny）用的权重缓存
+DET_CACHE_FILE="$CACHE_DIR/convnext_tiny-983f1562.pth"
 DET_OFFLINE=""
 if [ -f "$DET_CACHE_FILE" ]; then
     DET_OFFLINE="--offline"
-    echo "检测器 ResNet50 权重已缓存，使用 --offline。"
+    echo "检测器 ConvNeXt-Tiny 权重已缓存，使用 --offline。"
 else
-    echo "[警告] 未找到检测器 ResNet50 缓存权重: $DET_CACHE_FILE"
-    echo "       建议先缓存: python -c \"from torchvision.models import resnet50, ResNet50_Weights; resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)\""
+    echo "[错误] 未找到检测器 ConvNeXt-Tiny 缓存权重: $DET_CACHE_FILE"
+    echo "       缺少预训练 backbone 会让检测器退化为随机初始化、recall 恒为 0。"
+    echo "       请先在有网节点缓存: python -c \"from torchvision.models import convnext_tiny, ConvNeXt_Tiny_Weights; convnext_tiny(weights=ConvNeXt_Tiny_Weights.IMAGENET1K_V1)\""
+    echo "       再把该文件放到【真正运行训练的节点】的同一路径。"
+    exit 1
 fi
 
 # =============================================================================
@@ -168,12 +172,13 @@ echo ">>> Step 4: 批量预测 $PREDICT_DIR"
 python predict.py --dir "$PREDICT_DIR" --checkpoint best.pth
 
 # =============================================================================
-# Step 5：训练病灶检测器（可解释性；检测头可切换）
+# Step 5：训练病灶检测器（可解释性；分割式检测头，经子进程桥接 dermatology_detection）
 # =============================================================================
 echo ""
 echo ">>> Step 5: 训练病灶检测器（$DETECTION_HEAD @ ${DET_IMAGE_SIZE}px, $DET_EPOCHS epochs）"
-python detector/train_detector.py --head "$DETECTION_HEAD" \
-    --image_size "$DET_IMAGE_SIZE" --epochs "$DET_EPOCHS" $DET_OFFLINE
+python detector/train_segmentation.py --head "$DETECTION_HEAD" \
+    --backbone "$DET_BACKBONE" --image_size "$DET_IMAGE_SIZE" \
+    --epochs "$DET_EPOCHS" $DET_OFFLINE
 
 # =============================================================================
 # Step 6：可解释性推理（分类 + 检测 + 病灶特征描述）
