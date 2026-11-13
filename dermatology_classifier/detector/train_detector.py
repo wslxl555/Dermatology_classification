@@ -96,6 +96,17 @@ def eval_detection(model, loader, device, score_thresh=0.05, iou_thresh=0.5):
     return recall, precision, n_gt, n_pred
 
 
+def save_ckpt(model, head, image_size, epoch, ckpt_path):
+    """保存检测器 checkpoint（字段与 load_detector 完全对齐）。"""
+    torch.save({
+        "epoch": epoch,
+        "model_state_dict": model.state_dict(),
+        "detection_head": head,
+        "detection_classes": DETECTION_CLASSES,
+        "image_size": image_size,
+    }, ckpt_path)
+
+
 def main():
     args = parse_args()
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -146,17 +157,19 @@ def main():
 
         if recall > best_recall:
             best_recall = recall
-            torch.save({
-                "epoch": epoch,
-                "model_state_dict": model.state_dict(),
-                "detection_head": args.head,
-                "detection_classes": DETECTION_CLASSES,
-                "image_size": args.image_size,
-            }, CHECKPOINT_DIR / "lesion_detector.pth")
+            save_ckpt(model, args.head, args.image_size, epoch,
+                      CHECKPOINT_DIR / "lesion_detector.pth")
             print(f"  >> 已保存最佳检测器 (val recall={recall:.4f})")
 
+    # 兜底：若全程 recall 都为 0（如离线随机初始化、模型一个框都没检出），
+    # 上面的分支一次都不触发，会导致没有 checkpoint、Step 6 直接 FileNotFoundError。
+    ckpt_path = CHECKPOINT_DIR / "lesion_detector.pth"
+    if not ckpt_path.exists():
+        save_ckpt(model, args.head, args.image_size, args.epochs - 1, ckpt_path)
+        print(f"  [警告] val recall 全程为 0，已保存最后一轮模型（仅保证可运行，质量可能较差）")
+
     print(f"\n最佳 val recall@0.5: {best_recall:.4f}")
-    print(f"检测器已保存: {CHECKPOINT_DIR / 'lesion_detector.pth'}")
+    print(f"检测器已保存: {ckpt_path}")
 
 
 if __name__ == "__main__":
