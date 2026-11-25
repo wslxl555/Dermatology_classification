@@ -1,9 +1,35 @@
-"""Derm1M 辅助诊断管线。
-
-三段式：
-  Stage1 皮损检测 + 类型识别   —— 复用 dermatology_detection 的多任务模型
-  Stage2 皮损类型计数          —— 统计每种皮损的数量
-  Stage3 疾病诊断决策          —— 符号规则(ontology 概念层) + DermLIP 视觉零样本，融合
-
-详见 pipeline.py / run.py。
 """
+derm1m_diagnosis：Derm1M 对齐的「皮损类型 + 数量 → 皮肤疾病鉴别诊断」离线本体推理包。
+
+用法:
+    from derm1m_diagnosis import diagnose, format_report
+
+    result = diagnose({"bulla": 3, "erosion": 1})
+    print(format_report(result))
+"""
+
+from .diagnose import (
+    diagnose,
+    normalize_counts,
+    format_report,
+    diagnose_to_json,
+)
+from .ontology import (
+    DETECTION_CLASSES,
+    DETECTION_CLASSES_ZH,
+    DISEASE_ONTOLOGY,
+    DISEASE_NAMES_ZH,
+    DISEASE_ORDER,
+)
+
+__all__ = [
+    "diagnose",
+    "normalize_counts",
+    "format_report",
+    "diagnose_to_json",
+    "DETECTION_CLASSES",
+    "DETECTION_CLASSES_ZH",
+    "DISEASE_ONTOLOGY",
+    "DISEASE_NAMES_ZH",
+    "DISEASE_ORDER",
+]
