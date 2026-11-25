@@ -43,7 +43,7 @@ if str(_project_root) not in sys.path:
 from config import (
     DISEASE_CLASSES, DISEASE_CLASSES_ZH,
     LESION_CLASSES, LESION_CLASSES_ZH,
-    CHECKPOINT_DIR,
+    CHECKPOINT_DIR, NUM_DISEASE_CLASSES, NUM_LESION_CLASSES,
 )
 from models.multi_task_model import build_model
 from data.transforms import get_val_transforms
@@ -68,6 +68,14 @@ LESION_COLORS = [
     (255, 128, 128),   # lichenification - 粉红
     (128, 255, 128),   # fissure - 淡绿
 ]
+
+
+def _infer_num_classes(state_dict: dict, key: str, default: int) -> int:
+    """从 checkpoint 的某个分类头权重推断类别数（weight 第 0 维即类别数）。"""
+    w = state_dict.get(key)
+    if w is not None:
+        return int(w.shape[0])
+    return default
 
 
 class LesionPredictor:
@@ -118,12 +126,37 @@ class LesionPredictor:
         backbone = cfg.get("backbone", backbone)
         detection_enabled = cfg.get("detection_enabled", detection_enabled)
 
+        # 从 checkpoint 的 state_dict 推断实际类别数：config 的类别数可能已更新
+        # （例如皮损类别从 9 类增加到 10 类），旧 checkpoint 仍是旧类别数，
+        # 若按 config 构建模型会导致 load_state_dict 形状不匹配。
+        sd = checkpoint.get("model_state_dict", {})
+        num_lesion_classes = _infer_num_classes(
+            sd, "detection_head.head.cls_logits.weight", NUM_LESION_CLASSES,
+        )
+        num_disease_classes = _infer_num_classes(
+            sd, "disease_classifier.classifier.7.weight", NUM_DISEASE_CLASSES,
+        )
+        self.num_lesion_classes = num_lesion_classes
+
+        # 类别名：优先用 checkpoint 自带（自描述，按名字对齐），
+        # 否则回退到 config 的前 N 个（旧 checkpoint 无此字段，索引可能错位）。
+        stored_lesion = cfg.get("lesion_classes")
+        self.lesion_classes = (
+            list(stored_lesion) if stored_lesion else LESION_CLASSES[:num_lesion_classes]
+        )
+        stored_disease = cfg.get("disease_classes")
+        self.disease_classes = (
+            list(stored_disease) if stored_disease else DISEASE_CLASSES[:num_disease_classes]
+        )
+
         # 构建模型
         self.model = build_model(
             backbone_name=backbone,
             pretrained=False,
             detection_enabled=detection_enabled,
             detection_head=detection_head,
+            num_disease_classes=num_disease_classes,
+            num_lesion_classes=num_lesion_classes,
         )
         self.model.load_state_dict(checkpoint["model_state_dict"])
         self.model.to(self.device)
@@ -177,12 +210,12 @@ class LesionPredictor:
         disease_pred = int(np.argmax(disease_probs))
 
         disease_result = {
-            "class": DISEASE_CLASSES[disease_pred],
-            "name_zh": DISEASE_CLASSES_ZH.get(DISEASE_CLASSES[disease_pred], ""),
+            "class": self.disease_classes[disease_pred],
+            "name_zh": DISEASE_CLASSES_ZH.get(self.disease_classes[disease_pred], ""),
             "confidence": float(disease_probs[disease_pred]),
             "probs": {
-                DISEASE_CLASSES[i]: float(disease_probs[i])
-                for i in range(len(DISEASE_CLASSES))
+                self.disease_classes[i]: float(disease_probs[i])
+                for i in range(len(self.disease_classes))
             },
         }
 
@@ -225,8 +258,8 @@ class LesionPredictor:
                     y2 = int(bbox[3] * orig_h / in_h)
 
                     label_idx = int(batch_labels[i])
-                    if 0 <= label_idx < len(LESION_CLASSES):
-                        lesion_name = LESION_CLASSES[label_idx]
+                    if 0 <= label_idx < self.num_lesion_classes:
+                        lesion_name = self.lesion_classes[label_idx]
                         lesion_name_zh = LESION_CLASSES_ZH.get(lesion_name, lesion_name)
                     else:
                         lesion_name = f"class_{label_idx}"
@@ -283,7 +316,8 @@ class LesionPredictor:
         vis_img = img_bgr.copy()
         for det in result["detections"]:
             x1, y1, x2, y2 = det["bbox"]
-            label_idx = LESION_CLASSES.index(det["label"]) if det["label"] in LESION_CLASSES else 0
+            label_idx = (self.lesion_classes.index(det["label"])
+                         if det["label"] in self.lesion_classes else 0)
             color = LESION_COLORS[label_idx % len(LESION_COLORS)]
 
             # 绘制矩形框

@@ -36,26 +36,30 @@ DISEASE_CLASSES_ZH = {
 NUM_DISEASE_CLASSES = len(DISEASE_CLASSES)
 
 # =============================================================================
-# 标准化皮损标签(10 类 = 9 个高频类 + "other")
+# 标准化皮损标签(15 类)
 # 与 data/label_mapping.py 的 LESION_CLASSES 保持严格一致。
 # =============================================================================
-# 原发性皮损(高频)
+# 原发性皮损
 LESION_CLASSES = [
     "macule",          # 斑疹 — 扁平、不可触及的颜色改变
     "patch",           # 斑片 — 较大的斑疹(>1cm)
     "papule",          # 丘疹 — 小而实、隆起(<0.5cm)
     "plaque",          # 斑块 — 较大的扁平隆起(>0.5cm)
+    "nodule",          # 结节 — 深达真皮的实性隆起(>0.5cm)
     "vesicle",         # 水疱 — 小的含液疱(<0.5cm)
     "bulla",           # 大疱 — 大的含液疱(>0.5cm)，类天疱疹关键信号
-    # 继发性皮损(高频)
+    "pustule",         # 脓疱 — 含脓液的疱
+    # 继发性皮损
     "scale",           # 鳞屑 — 角质层脱落
     "crust",           # 痂 — 干涸的血清/血液/脓液
     "erosion",         # 糜烂 — 表皮部分缺失
-    # 低频类别合并
-    "other",           # 其他(结节/脓疱/抓痕/瘢痕/苔藓化/皲裂)
+    "excoriation",     # 抓痕 — 搔抓导致的线状缺损
+    "scar",            # 瘢痕 — 纤维化修复
+    "lichenification", # 苔藓化 — 皮纹加深增厚
+    "fissure",         # 皲裂 — 线状裂口
 ]
 
-NUM_LESION_CLASSES = len(LESION_CLASSES)  # 10
+NUM_LESION_CLASSES = len(LESION_CLASSES)  # 15
 
 # =============================================================================
 # 检测头可选值（供 argparse / 文档使用）
@@ -81,7 +85,6 @@ LESION_CLASSES_ZH = {
     "scar": "瘢痕",
     "lichenification": "苔藓化",
     "fissure": "皲裂",
-    "other": "其他",
 }
 
 # 重映射:原始标签 → 标准化标签

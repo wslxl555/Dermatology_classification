@@ -21,6 +21,7 @@ from training.losses import MultiTaskLoss, compute_class_weights
 from training.metrics import MetricsTracker
 from config import (
     DISEASE_CLASSES, DISEASE_CLASSES_ZH,
+    LESION_CLASSES, LESION_CLASSES_ZH,
     TRAINING_CONFIG, CHECKPOINT_DIR, LOG_DIR,
 )
 
@@ -583,12 +584,19 @@ class Trainer:
         model_state_dict，因此这里精简保存。
         """
         path = CHECKPOINT_DIR / filename
+        # 把类别名写进 config，使 checkpoint 自描述：
+        # 加载时按名字对齐，不再依赖索引顺序（避免类别列表增删后索引错位）。
+        save_config = dict(self.config)
+        save_config.setdefault("lesion_classes", LESION_CLASSES)
+        save_config.setdefault("lesion_classes_zh", LESION_CLASSES_ZH)
+        save_config.setdefault("disease_classes", DISEASE_CLASSES)
+        save_config.setdefault("disease_classes_zh", DISEASE_CLASSES_ZH)
         torch.save({
             "epoch": self.current_epoch,
             "model_state_dict": self.model.state_dict(),
             "best_val_f1": self.best_val_f1,
             "best_det_map": self.best_det_map,
-            "config": self.config,
+            "config": save_config,
         }, path)
         print(f"  Checkpoint saved: {path}")
 

@@ -196,9 +196,14 @@ def build_model(
     detection_enabled: bool = MODEL_CONFIG["detection_enabled"],
     offline: bool = False,
     detection_head: str = MODEL_CONFIG["detection_head"],
+    num_disease_classes: int = NUM_DISEASE_CLASSES,
+    num_lesion_classes: int = NUM_LESION_CLASSES,
 ) -> MultiTaskEczemaModel:
     """
     构建完整多任务模型的工厂函数。
+
+    num_disease_classes / num_lesion_classes 允许与 checkpoint 实际类别数对齐，
+    避免 config 类别数更新后与旧 checkpoint 不匹配导致加载失败。
     """
     return MultiTaskEczemaModel(
         backbone_name=backbone_name,
@@ -206,4 +211,6 @@ def build_model(
         detection_enabled=detection_enabled,
         offline=offline,
         detection_head=detection_head,
+        num_disease_classes=num_disease_classes,
+        num_lesion_classes=num_lesion_classes,
     )

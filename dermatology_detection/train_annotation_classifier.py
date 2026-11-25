@@ -240,6 +240,10 @@ def main():
             "dropout": args.dropout,
             "num_lesion_classes": len(LESION_CLASSES),
             "num_diseases": len(DISEASE_CLASSES),
+            "lesion_classes": LESION_CLASSES,
+            "lesion_classes_zh": LESION_CLASSES_ZH,
+            "disease_classes": DISEASE_CLASSES,
+            "disease_classes_zh": DISEASE_CLASSES_ZH,
         },
     }, ckpt_path)
     print(f"\nBest val F1: {best_f1:.4f} at epoch {best_epoch}")

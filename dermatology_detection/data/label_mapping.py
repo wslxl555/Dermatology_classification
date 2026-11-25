@@ -19,22 +19,26 @@
 import re
 
 # =============================================================================
-# 标准化皮损类别(10 类 = 9 个高频类 + "other")
+# 标准化皮损类别(15 类)
 # =============================================================================
-# 低频类别 nodule / pustule / excoriation / scar / lichenification /
-# fissure 在标注中样本极少,单独建模会拖累检测 mAP,统一合并为 "other"。
-# 注意:bulla(大疱) 是类天疱疹的关键诊断信号,单独保留(不并入 other)。
+# 原发性皮损
 LESION_CLASSES = [
     "macule",          # 斑疹
     "patch",           # 斑片
     "papule",          # 丘疹
     "plaque",          # 斑块
+    "nodule",          # 结节
     "vesicle",         # 水疱
     "bulla",           # 大疱
+    "pustule",         # 脓疱
+    # 继发性皮损
     "scale",           # 鳞屑
     "crust",           # 痂
     "erosion",         # 糜烂
-    "other",           # 其他(结节/脓疱/抓痕/瘢痕/苔藓化/皲裂)
+    "excoriation",     # 抓痕
+    "scar",            # 瘢痕
+    "lichenification", # 苔藓化
+    "fissure",         # 皲裂
 ]
 
 LESION_CLASS_TO_IDX = {name: idx for idx, name in enumerate(LESION_CLASSES)}
@@ -43,29 +47,28 @@ LESION_CLASS_TO_IDX = {name: idx for idx, name in enumerate(LESION_CLASSES)}
 # 中文 → 英文基础映射
 # =============================================================================
 ZH_TO_EN_BASE = {
-    # 原发性皮损(高频,保留)
+    # 原发性皮损
     "斑疹": "macule",
     "斑片": "patch",
     "丘疹": "papule",
     "斑块": "plaque",
+    "结节": "nodule",
     "水疱": "vesicle",
-    # 继发性皮损(高频,保留)
+    "大疱": "bulla",   # 类天疱疹关键信号
+    "脓疱": "pustule",
+    # 继发性皮损
     "鳞屑": "scale",
     "痂": "crust",
     "糜烂": "erosion",
-    # 低频皮损 → 合并为 other
-    "结节": "other",
-    "大疱": "bulla",   # 类天疱疹关键信号，单独保留
-    "脓疱": "other",
-    "抓痕": "other",
-    "瘢痕": "other",
-    "苔藓化": "other",
-    "皲裂": "other",
+    "抓痕": "excoriation",
+    "瘢痕": "scar",
+    "苔藓化": "lichenification",
+    "皲裂": "fissure",
     # 复合 / 特殊
     "斑丘疹": "maculopapule",  # 将被拆分为 [macule, papule]
     "红斑": "macule",          # 红斑 = 红斑性斑疹
     "渗出": "erosion",         # 渗出 = 渗出液,最接近糜烂
-    "色沉": "other",           # 炎症后色素沉着 ≈ 瘢痕(低频)
+    "色沉": "scar",            # 色素沉着 ≈ 瘢痕(见 "Scar(色沉)" 标注)
     "血痂": "crust",           # 血痂 = 出血性痂
 }
 
@@ -111,25 +114,23 @@ def clean_label(raw_label: str) -> str:
 # =============================================================================
 
 # 将每个英文基础词映射到其标准化类别
-# 低频类别(Nodule/Bulla/Pustule/Excoriation/Scar/Lichenification/Fissure)
-# 统一映射到 "other",缓解长尾分布对检测的影响。
 EN_BASE_TO_CLASS = {
     "Macule": "macule",
     "Maculopapule": "macule",  # 将通过多标签与 papule 一起出现
     "Patch": "patch",
     "Papule": "papule",
     "Plaque": "plaque",
+    "Nodule": "nodule",
     "Vesicle": "vesicle",
+    "Bulla": "bulla",   # 类天疱疹关键信号
+    "Pustule": "pustule",
     "Scale": "scale",
     "Crust": "crust",
     "Erosion": "erosion",
-    "Nodule": "other",
-    "Bulla": "bulla",   # 类天疱疹关键信号，单独保留
-    "Pustule": "other",
-    "Excoriation": "other",
-    "Scar": "other",
-    "Lichenification": "other",
-    "Fissure": "other",
+    "Excoriation": "excoriation",
+    "Scar": "scar",
+    "Lichenification": "lichenification",
+    "Fissure": "fissure",
 }
 
 
