@@ -1,69 +1,119 @@
-# derm1m_diagnosis —— Derm1M 辅助诊断管线
+# derm1m_diagnosis
 
-把「皮损检测 → 类型识别 → 类型计数 → 疾病诊断」串成一条可解释的诊断管线，
-用 Derm1M（DermLIP 视觉-语言模型 + 临床概念 ontology）做最终的疾病决策。
+**Derm1M 对齐的「皮损类型 + 数量 → 皮肤疾病鉴别诊断」离线本体推理包。**
 
-## 管线结构
+在已有皮损检测（`dermatology_detection`）之上，用 Derm1M 的临床本体知识，
+把「检出哪些皮损、各几个」转化为**可解释的鉴别诊断排序**，回答"为什么判这个病"。
+
+纯 Python，不依赖 torch / 网络，可直接在 CPU 上跑。
+
+## 定位
+
+整个诊断流水线分三步，本包负责**第三步**：
 
 ```
-图像
- ├─ Stage1 皮损检测 + 类型   复用 dermatology_detection 的 LesionPredictor（FCOS 多任务模型）
- ├─ Stage2 皮损类型计数       lesion_rules.count_lesions()
- └─ Stage3 疾病诊断决策
-      信号A 符号规则          lesion_rules.score_from_counts()  （Derm1M ontology 概念层）
-      信号B DermLIP 视觉零样本 dermlip.DermLIPClient.zero_shot_disease()
-     → 融合(softmax 后按 alpha 加权) → 最终疾病 + 可解释文字
+① 检测皮损区域        dermatology_detection/inference/detect_lesions.py
+② 认准皮损类型 + 计数  （检测输出自带 label 与数量）
+③ Derm1M 决定诊断     ★ 本包 derm1m_diagnosis
 ```
 
-## 用法
+## 为什么是"用 Derm1M 决定"
+
+Derm1M 的核心资产是一套**与临床本体对齐**的 130 个临床概念（皮损形态、颜色、
+皮肤镜特征等）。本包：
+
+- 直接复用 Derm1M 的概念名（`bulla`/`vesicle`/`scale`/`wheal`/`lichenification`…），
+  并读取本地 `Derm1M/concept_annotation/term_lists/ConceptTerms.json` 解析同义词
+  （`blister`→bulla、`scaly`→scale、`bullae`→bulla…）。
+- 依据标准皮肤病学，把「皮损形态组合」映射到病种，例如 Derm1M 的 `wheal` 概念
+  直接关联荨麻疹；`bulla` 是类天疱疹的核心信号。
+
+## 目录
+
+```
+derm1m_diagnosis/
+    ontology.py        # 15 类皮损 + 4 病种的本体（Derm1M 概念对齐）
+    diagnose.py        # 推理引擎（计数饱和 + 加权证据 + 鉴别诊断排序）
+    cli.py             # 命令行入口
+    test_diagnose.py   # 冒烟测试 / 典型病例示例
+    README.md
+```
+
+## 快速开始
 
 ```bash
-# 单张（纯规则模式，无需下载 DermLIP 权重）
-python -m derm1m_diagnosis.run --image D:/path/img.jpg --no_dermlip
+# 1) 直接给定皮损计数（离线演示 / 快速验证）
+python -m derm1m_diagnosis.cli --counts "bulla:3,erosion:1,crust:1"
 
-# 单张（启用 DermLIP 视觉信号）
-python -m derm1m_diagnosis.run --image D:/path/img.jpg
-
-# 文件夹批量 + 输出 JSON
-python -m derm1m_diagnosis.run --image_dir D:/path/folder/ --out results.json
-
-# 融合权重：alpha=1 只用规则，alpha=0 只用 DermLIP
-python -m derm1m_diagnosis.run --image img.jpg --alpha 1.0
+# 2) 消费检测器输出（detect_lesions.py --out 的 JSON）
+python dermatology_detection/inference/detect_lesions.py \
+    --checkpoint dermatology_detection/outputs/checkpoints/best.pth \
+    --dir images/ --out det.json
+python -m derm1m_diagnosis.cli --detection-json det.json
 ```
 
-## 三个信号的含义
+Python 调用：
 
-| 信号 | 输入 | 依据 | 强弱 |
+```python
+from derm1m_diagnosis import diagnose, format_report
+
+result = diagnose({"bulla": 3, "erosion": 1, "crust": 1})
+print(format_report(result))
+# 结论: 最符合「类天疱疹」
+```
+
+## 皮损类别（与检测器输出严格一致）
+
+15 类，与 `dermatology_detection/config.py` 的 `LESION_CLASSES` 完全一致：
+
+```
+macule patch papule plaque nodule vesicle bulla pustule
+scale crust erosion excoriation scar lichenification fissure
+```
+
+> 兼容 `dermatology_classifier/detector` 的旧 10 类词汇：旧词汇里的 `other`
+> （结节/脓疱/抓痕/瘢痕/苔藓化/皲裂 的合并桶）也会被识别，作为低信息证据参与。
+
+## 本体（4 病种）
+
+| 病种 | 关键损害 | 支持损害 | 反对损害 |
 |---|---|---|---|
-| A 符号规则 | 皮损类型 + 数量 | Derm1M ontology 概念层（bulla→类天疱疹、scale/crust→湿疹、无鳞屑→荨麻疹） | 可解释、无需权重 |
-| B DermLIP 零样本 | 整图 + 各病灶 crop | DermLIP 图文对齐（CLIP 风格） | 需权重 + 网络 |
-| C 文本检索 | 皮损摘要句 | DermLIP 文本编码器 → 诊断描述语料库 | 近似，需验证 |
+| 类天疱疹 | 大疱(3.0) | 糜烂/痂/水疱/斑疹/斑块 | — |
+| 荨麻疹 | 风团≈斑块/丘疹(1.5) | 斑疹(红斑) | 鳞屑/痂/大疱/糜烂/苔藓化/皲裂/抓痕 |
+| 湿疹 | —（多形性组合） | 鳞屑/水疱/苔藓化/丘疹/糜烂/痂/抓痕 | 大疱(弱反对) |
+| 接触性皮炎 | — | 水疱/糜烂/大疱/痂/鳞屑/苔藓化/皲裂/斑疹 | — |
 
-## 已知问题（重要）
+- `风团(wheal)` 是荨麻疹特征性损害，但本项目检测器无独立 `wheal` 类，
+  故映射到最接近的 `斑块(plaque)/丘疹(papule)`。
+- 权重为启发式、临床可解释；计数通过 `min(count, cap=3)` 饱和，使
+  「3 个大疱」比「1 个大疱」证据更强，但不会线性放大 20 倍。
 
-1. **Stage1 检测头不可靠**：`best.pth` 的 FCOS 检测头在 CPU 训练下已坍缩为
-   "全图输出 bulla"（100 个框、均值置信度 0.60）。**检测输入不可信，则 Stage2/3 的
-   计数与规则结论也会被带偏**。这是训练问题，非代码问题。修复路径：
-   - GPU 重训检测头（README 建议 30–50 epoch），或
-   - 用 DermLIP 零样本对病灶 crop 做 concept 分类（`zero_shot_lesion_crop`）替代/校准 FCOS。
-2. **皮损类别无 wheal（风团）**：荨麻疹的标志性皮损不在 15 类里，规则层对荨麻疹
-   只能靠负证据（无鳞屑/痂/糜烂），判别较弱，需靠 DermLIP 视觉信号兜底。
-3. **DermLIP 依赖未装**：需 `pip install safetensors timm`（open_clip 已在 Derm1M/src 内），
-   且首次运行会从 HuggingFace 下载权重（约 350MB）。不可用时管线自动退化为纯规则模式。
-4. **旧 checkpoint 与 15 类体系不兼容**：config 皮损类别已恢复为 15 类，但现有的
-   `best.pth` 是旧 9 类训练的，类别索引会错位（例如旧的 index 5 在新列表里变成了 vesicle）。
-   检测头需用 15 类重新训练后才能正确使用新的分类体系。
+## 计分与输出
 
-## 文件
+- 支持度 = Σ 支持权重·饱和计数 − Σ 反对权重·饱和计数（正=支持，负=反对）。
+- 病种间用 softmax 归一化为「相对置信度」（仅相对排序，非校准概率）。
+- 全为负分（未检出足够支持性皮损）时返回「证据不足」。
 
-- `lesion_rules.py` —— Stage2 计数 + Stage3 符号规则（纯 Python，无依赖）
-- `dermlip.py` —— DermLIP 客户端（懒加载 + 优雅降级）
-- `pipeline.py` —— 三段编排 + 融合 + 文字诊断
-- `run.py` —— CLI
+每个病种输出：支持度、支持证据、反对证据、缺失关键损害、临床说明。
 
-## 附带修复
+## 已知限制
 
-- `dermatology_detection/models/multi_task_model.py`：`build_model` 新增
-  `num_disease_classes` / `num_lesion_classes` 参数。
-- `dermatology_detection/inference/predict_labeled.py`：`LesionPredictor` 从 checkpoint
-  的 state_dict 推断实际类别数（旧 checkpoint 9 类 vs config 10 类），避免加载失败。
+1. **检测 checkpoint 与当前 15 类 config 不匹配**：仓库内 `dermatology_detection/
+   outputs/checkpoints/best.pth`（FCOS）等是用旧类别数（8 个前景类）训练的，
+   直接 `load_state_dict` 会 size mismatch（cls_logits 9 vs 15）。需按当前 15 类
+   config 重新训练检测器后，`detect_lesions.py` 才能输出 15 类标签。
+2. **`wheal` 无独立检测类**：荨麻疹的风团被近似到斑块/丘疹，信号较弱；
+   如需更强区分，可给检测器新增 `wheal` 类。
+3. **本体覆盖 4 病种**：按用户确认范围（接触性皮炎/湿疹/类天疱疹/荨麻疹）。
+   扩展到 Derm1M 390 病种需要 `ontology.json`（当前网络受限无法下载）。
+4. **支持度非校准概率**：只用于病种间相对排序，不能当作确诊概率。
+
+## 测试
+
+```bash
+python derm1m_diagnosis/test_diagnose.py
+```
+
+覆盖：典型类天疱疹（大疱为主）、典型荨麻疹（风团样）、典型/慢性湿疹、
+急性接触性皮炎、鳞屑+结痂（排除荨麻疹），以及空输入（证据不足）、
+中文/Derm1M 概念/同义词归一化。
