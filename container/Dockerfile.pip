@@ -1,0 +1,36 @@
+# =============================================================================
+# 皮肤病分类/检测 + Derm1M(DermLIP) + PanDerm 环境镜像（pip 声明式，自包含）
+#
+# 与 Dockerfile（conda-pack 快照方式）二选一。本文件不依赖任何一台机器的
+# 现成 conda 环境，直接在镜像里 pip 安装所有依赖，可复现、易更新。
+#
+# 构建前：把 requirements.txt 放在本目录下。
+# 宿主机要求：NVIDIA 驱动 + nvidia-container-toolkit（RTX 3090 已验证）。
+# =============================================================================
+FROM nvidia/cuda:12.1.0-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    PYTHONUNBUFFERED=1
+
+# 系统库 + Python + git（Derm1M/PanDerm 需要 git clone / 读仓库）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3 python3-pip python3-dev git curl \
+        libgl1 libglib2.0-0 libxrender1 libxext6 libsm6 libstdc++6 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir --upgrade pip
+
+# torch + torchvision（CUDA 12.1；版本与 PanDerm README 一致，RTX 3090 可用）
+RUN pip install --no-cache-dir \
+        torch==2.4.1 torchvision==0.19.1 \
+        --index-url https://download.pytorch.org/whl/cu121
+
+# 其余依赖
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+WORKDIR /workspace
+
+# 运行训练/推理时：挂载项目目录 + HuggingFace 缓存
+CMD ["/bin/bash"]

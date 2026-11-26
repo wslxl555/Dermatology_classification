@@ -1,0 +1,42 @@
+# 皮肤病分类/检测 + Derm1M(DermLIP) + PanDerm 的统一依赖（torch 已在 Dockerfile 里单独装）
+# 注意：PanDerm/segmentation（MMSegmentation/lightning）依赖较重，未包含，需单独起镜像。
+
+# —— 基础数值/图像 ——
+numpy==1.26.4
+scipy
+pandas>=2.0,<2.2
+scikit-learn>=1.3,<1.6
+opencv-python>=4.8
+Pillow>=10.0
+albumentations>=1.3
+matplotlib>=3.7
+seaborn>=0.12
+tqdm>=4.65
+
+# —— 检测/标注 ——
+labelme>=5.5
+lxml>=4.9
+
+# —— Derm1M / DermLIP（CLIP 风格模型加载）——
+timm==0.9.16
+safetensors
+huggingface_hub
+open_clip_torch
+ftfy
+regex
+braceexpand
+webdataset
+pyrootutils
+pycm
+
+# —— PanDerm classification ——
+h5py
+PyYAML
+mlxtend
+tensorboardX
+
+# —— 日志/可视化 ——
+tensorboard>=2.13
+
+# —— 通用（Derm1M / PanDerm segmentation 共用，版本取兼容交集）——
+transformers==4.40.1
