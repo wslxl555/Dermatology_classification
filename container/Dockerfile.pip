@@ -24,7 +24,7 @@ RUN pip install --no-cache-dir --upgrade pip
 # torch + torchvision（CUDA 12.1；版本与 PanDerm README 一致，RTX 3090 可用）
 RUN pip install --no-cache-dir \
         torch==2.4.1 torchvision==0.19.1 \
-        --index-url https://download.pytorch.org/whl/cu121
+        --index-url https://mirrors.aliyun.com/pytorch-wheels/cu121
 
 # 其余依赖
 COPY requirements.txt /tmp/requirements.txt
