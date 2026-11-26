@@ -37,7 +37,7 @@ RUN pip install --no-cache-dir --upgrade pip -i https://pypi.tuna.tsinghua.edu.c
 # 改成官方源
 RUN pip install --no-cache-dir \
         torch==2.4.1 torchvision==0.19.1 \
-        --index-url https://download.pytorch.org/whl/cu121
+        --index-url https://mirror.sjtu.edu.cn/pytorch-wheels/cu121
 
 
 # 其余依赖（走清华 PyPI 镜像）
