@@ -6,6 +6,7 @@
 #
 # 构建前：把 requirements.txt 放在本目录下。
 # 宿主机要求：NVIDIA 驱动 + nvidia-container-toolkit（RTX 3090 已验证）。
+# 国内环境：apt 走清华镜像、torch 走阿里云 wheel、pip 走清华 PyPI 镜像。
 # =============================================================================
 FROM nvidia/cuda:12.1.0-runtime-ubuntu22.04
 
@@ -13,22 +14,33 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
     PYTHONUNBUFFERED=1
 
-# 系统库 + Python + git（Derm1M/PanDerm 需要 git clone / 读仓库）
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# 系统库 + Python + git
+# apt 源换成清华镜像（archive.ubuntu.com 在国内 GPG 签名常被干扰）；
+# 并移除 nvidia/cuda 基底自带的 CUDA apt 源（torch 走 pip 装，自带 CUDA 运行时）
+RUN rm -f /etc/apt/sources.list /etc/apt/sources.list.d/*.list \
+    && printf '%s\n' \
+        'deb http://mirrors.tuna.tsinghua.edu.cn/ubuntu/ jammy main restricted universe multiverse' \
+        'deb http://mirrors.tuna.tsinghua.edu.cn/ubuntu/ jammy-updates main restricted universe multiverse' \
+        'deb http://mirrors.tuna.tsinghua.edu.cn/ubuntu/ jammy-backports main restricted universe multiverse' \
+        'deb http://mirrors.tuna.tsinghua.edu.cn/ubuntu/ jammy-security main restricted universe multiverse' \
+        > /etc/apt/sources.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
         python3 python3-pip python3-dev git curl \
         libgl1 libglib2.0-0 libxrender1 libxext6 libsm6 libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir --upgrade pip
+# 升级 pip（走清华镜像）
+RUN pip install --no-cache-dir --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-# torch + torchvision（CUDA 12.1；版本与 PanDerm README 一致，RTX 3090 可用）
+# torch + torchvision（CUDA 12.1；版本与 PanDerm README 一致，RTX 3090 可用；走阿里云 wheel 镜像）
 RUN pip install --no-cache-dir \
         torch==2.4.1 torchvision==0.19.1 \
         --index-url https://mirrors.aliyun.com/pytorch-wheels/cu121
 
-# 其余依赖
+# 其余依赖（走清华 PyPI 镜像）
 COPY requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 WORKDIR /workspace
 
