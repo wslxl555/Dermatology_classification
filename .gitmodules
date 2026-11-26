@@ -1,0 +1,6 @@
+[submodule "Derm1M"]
+	path = Derm1M
+	url = git@github.com:wslxl555/Derm1M.git
+[submodule "PanDerm"]
+	path = PanDerm
+	url = git@github.com:wslxl555/PanDerm.git
